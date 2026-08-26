@@ -7,7 +7,7 @@ from typing import List, Optional
 
 from app.backtest.engine import BacktestConfig, BacktestEngine
 from app.market.mock_provider import MockMarketDataProvider
-from app.strategies.builtin import MACDStrategy, MACrossStrategy, RSIStrategy
+from app.strategies.builtin import MACDStrategy, MACrossStrategy, RSIStrategy, MomentumStrategy, BollingerStrategy, ValueStrategy
 
 router = APIRouter()
 _provider = MockMarketDataProvider()
@@ -16,6 +16,9 @@ STRATEGY_MAP = {
     "MACD": MACDStrategy,
     "MA5x20": lambda: MACrossStrategy(5, 20),
     "RSI": RSIStrategy,
+    "Momentum": MomentumStrategy,
+    "Bollinger": BollingerStrategy,
+    "Value": ValueStrategy,
 }
 
 
