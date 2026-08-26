@@ -1,9 +1,10 @@
-"""Market data endpoints – powered by ProviderManager with fallback."""
+"""Market data endpoints – powered by ProviderManager with fallback + DB sync."""
 from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel
 
 from app.market.provider_manager import ProviderManager
 from app.market.mock_provider import MockMarketDataProvider
@@ -91,11 +92,12 @@ async def get_announcements(symbol: Optional[str] = None, limit: int = 20):
 
 @router.get("/data-status")
 async def get_data_status():
-    """Get market data provider health status."""
+    """Get market data provider health and cache status."""
     return {
         "success": True,
         "data": {
             "providers": _provider.get_provider_status(),
+            "primary_provider": _provider.primary_provider,
             "cache": _cache.stats,
         },
     }

@@ -1,23 +1,30 @@
 """
-Market data service – bridges MarketDataProvider with the database.
+Market data service – bridges ProviderManager with the database.
 
 Responsibilities:
-1. Fetch data from provider (Tushare/AkShare/etc.)
-2. Persist to database (stocks, klines, financials)
-3. Update cache (Redis)
-4. Provide data to strategies and agents from DB when provider is unavailable
+1. Fetch data from provider chain (AkShare → Mock fallback)
+2. Persist to database (stocks, klines)
+3. Read from DB when provider is unavailable (stale-while-revalidate)
+4. Expose provider health and cache status
 """
 from __future__ import annotations
 
-from typing import List, Optional
+import time
+from datetime import datetime, timezone
+from typing import Dict, List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_data_logger
-from app.market.base import MarketDataProvider
+from app.market.base import DataAvailability, DataFreshness, MarketDataProvider
+from app.market.provider_manager import ProviderManager
+from app.market.cache import MarketDataCache
 from app.repositories.factory import RepositoryFactory
 
 logger = get_data_logger()
+
+# How old DB data can be before we re-fetch (seconds)
+DB_STALE_THRESHOLD = 300  # 5 minutes
 
 
 class MarketDataService:
@@ -27,9 +34,17 @@ class MarketDataService:
         self.repos = RepositoryFactory(session)
         self.provider = provider
 
+    @property
+    def provider_manager(self) -> Optional[ProviderManager]:
+        """Get the underlying ProviderManager if available."""
+        return self.provider if isinstance(self.provider, ProviderManager) else None
+
     async def sync_stock_list(self, market: Optional[str] = None) -> int:
         """Fetch and persist the full stock list from provider."""
         stocks = await self.provider.get_stock_list(market)
+        if not stocks:
+            logger.warning("sync_stock_list_empty", market=market)
+            return 0
         count = await self.repos.stocks.bulk_create([
             {
                 "symbol": s["symbol"],
@@ -40,7 +55,7 @@ class MarketDataService:
             }
             for s in stocks
         ])
-        logger.info("Stock list synced", count=count, provider=self.provider.name)
+        logger.info("stock_list_synced", count=count, provider=self.provider.name)
         return count
 
     async def sync_klines(
@@ -51,6 +66,9 @@ class MarketDataService:
     ) -> int:
         """Fetch and persist kline data for a symbol."""
         klines = await self.provider.get_kline(symbol, timeframe=timeframe, limit=limit)
+        if not klines:
+            logger.warning("sync_klines_empty", symbol=symbol)
+            return 0
         data = [
             {
                 "symbol": k.symbol,
@@ -69,30 +87,94 @@ class MarketDataService:
             for k in klines
         ]
         count = await self.repos.klines.bulk_upsert(data)
-        logger.info("Klines synced", symbol=symbol, count=count)
+        logger.info("klines_synced", symbol=symbol, count=count, timeframe=timeframe)
         return count
 
     async def update_quote_snapshot(self, symbol: str) -> dict:
         """Fetch and store latest quote for a symbol."""
         quote = await self.provider.get_realtime_quote(symbol)
-        await self.repos.stocks.update_quote(
+        stock = await self.repos.stocks.update_quote(
             symbol=symbol,
             price=quote.price,
             volume=quote.volume,
             amount=quote.amount,
             timestamp=quote.timestamp,
         )
+        if stock:
+            logger.info("quote_snapshot_updated", symbol=symbol, price=quote.price,
+                       provider=quote.data_source)
+        else:
+            logger.warning("quote_snapshot_stock_not_found", symbol=symbol)
         return quote.__dict__
 
-    async def get_historical_closes(self, symbol: str, limit: int = 100) -> List[float]:
-        """Get close prices from DB, falling back to provider if needed."""
-        closes = await self.repos.klines.get_closes(symbol, limit=limit)
-        if not closes:
-            # DB empty – fetch from provider and persist
-            await self.sync_klines(symbol, limit=limit)
+    async def get_historical_closes(
+        self, symbol: str, limit: int = 100, prefer_db: bool = True,
+    ) -> List[float]:
+        """Get close prices, preferring DB (fast) then falling back to provider."""
+        if prefer_db:
             closes = await self.repos.klines.get_closes(symbol, limit=limit)
-        return closes
+            if closes and len(closes) >= min(limit, 5):
+                logger.info("closes_from_db", symbol=symbol, count=len(closes))
+                return closes
+
+        # DB empty or stale – fetch from provider and persist
+        synced = await self.sync_klines(symbol, limit=limit)
+        if synced > 0:
+            closes = await self.repos.klines.get_closes(symbol, limit=limit)
+            if closes:
+                return closes
+
+        # Last resort: return what we have from DB (may be stale)
+        return await self.repos.klines.get_closes(symbol, limit=limit)
 
     async def get_market_overview(self) -> dict:
         """Get market overview from provider (not persisted – always fresh)."""
         return await self.provider.get_market_overview()
+
+    async def get_data_status(self) -> dict:
+        """Get comprehensive data status: providers, cache, DB stats."""
+        status: Dict = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+        # Provider status
+        pm = self.provider_manager
+        if pm:
+            status["providers"] = pm.get_provider_status()
+            status["primary_provider"] = pm.primary_provider
+        else:
+            status["providers"] = [{"provider": self.provider.name, "note": "single provider"}]
+
+        # DB stats
+        try:
+            stock_count = await self.repos.stocks.count(is_active=True)
+            status["db"] = {"active_stocks": stock_count}
+        except Exception as e:
+            status["db"] = {"error": str(e)[:100]}
+
+        return status
+
+    async def sync_full(self, symbol: str) -> dict:
+        """Full sync for a symbol: quote + klines. Returns sync result."""
+        result = {"symbol": symbol, "synced": {}, "errors": {}}
+
+        # Sync quote
+        try:
+            quote_data = await self.update_quote_snapshot(symbol)
+            result["synced"]["quote"] = {
+                "price": quote_data.get("price"),
+                "data_source": quote_data.get("data_source"),
+            }
+        except Exception as e:
+            result["errors"]["quote"] = str(e)[:200]
+            logger.warning("sync_quote_failed", symbol=symbol, error=str(e)[:200])
+
+        # Sync klines
+        try:
+            count = await self.sync_klines(symbol, limit=200)
+            result["synced"]["klines"] = {"count": count}
+        except Exception as e:
+            result["errors"]["klines"] = str(e)[:200]
+            logger.warning("sync_klines_failed", symbol=symbol, error=str(e)[:200])
+
+        return result
