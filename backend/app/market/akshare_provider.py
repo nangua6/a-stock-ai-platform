@@ -10,12 +10,14 @@ Resilience features:
 - DNS / Connection / Timeout error handling
 - Empty-data and format-change guards
 - Structured error logging (no secrets)
+- Proxy-aware: disables system proxy when it causes failures
 
 NOTE: Requires network access. Use MockMarketDataProvider in sandbox/offline.
 """
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from datetime import datetime, timezone
 from typing import List, Optional
@@ -38,9 +40,6 @@ REQUEST_TIMEOUT = 15.0  # seconds per akshare call
 
 
 # ── Symbol format helpers ────────────────────────────────────────────────────
-# Our system uses: 600519.SH / 000858.SZ
-# AkShare uses:    600519     / 000858    (no suffix for most APIs)
-
 def _to_akshare_symbol(symbol: str) -> str:
     """600519.SH -> 600519"""
     return symbol.split(".")[0]
@@ -49,6 +48,26 @@ def _to_akshare_symbol(symbol: str) -> str:
 def _from_em_symbol(code: str, market: str) -> str:
     """600519, SH -> 600519.SH"""
     return f"{code}.{market}"
+
+
+def _ensure_no_system_proxy():
+    """
+    Ensure that system proxy settings don't interfere with AkShare.
+
+    On macOS with Clash/ClashX in TUN mode, Python's requests library picks up
+    system proxy settings from networksetup. When the proxy is unstable for
+    certain Eastmoney domains, we need to bypass it.
+
+    This sets NO_PROXY=* which tells requests to not use any proxy.
+    Direct connections work because Clash TUN mode still captures the traffic
+    at the network level (transparent proxy).
+    """
+    if "NO_PROXY" not in os.environ and "no_proxy" not in os.environ:
+        os.environ["NO_PROXY"] = "*"
+
+
+# Initialize proxy bypass on module load
+_ensure_no_system_proxy()
 
 
 async def _retry_call(coro_factory, operation: str, symbol: str = ""):
@@ -82,6 +101,7 @@ async def _retry_call(coro_factory, operation: str, symbol: str = ""):
                 latency_ms=round(elapsed * 1000, 1),
             )
         except ConnectionError as e:
+            elapsed = time.time() - start
             last_error = f"ConnectionError: {e}"
             logger.warning(
                 "akshare_connection_error",
@@ -91,7 +111,7 @@ async def _retry_call(coro_factory, operation: str, symbol: str = ""):
                 error=str(e)[:200],
             )
         except OSError as e:
-            # Includes DNS resolution failures
+            elapsed = time.time() - start
             last_error = f"OSError({e.errno}): {e}"
             logger.warning(
                 "akshare_network_error",
@@ -101,6 +121,7 @@ async def _retry_call(coro_factory, operation: str, symbol: str = ""):
                 error=str(e)[:200],
             )
         except Exception as e:
+            elapsed = time.time() - start
             last_error = f"{type(e).__name__}: {e}"
             logger.warning(
                 "akshare_unexpected_error",
