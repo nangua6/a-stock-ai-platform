@@ -5,7 +5,8 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import JSON
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import BaseModel
@@ -27,8 +28,8 @@ class Signal(BaseModel):
     position_target: Mapped[float | None] = mapped_column(Float)
     strategy_name: Mapped[str | None] = mapped_column(String(50))
     agent_name: Mapped[str | None] = mapped_column(String(50))
-    reasons: Mapped[dict | None] = mapped_column(JSONB)
-    risks: Mapped[dict | None] = mapped_column(JSONB)
+    reasons: Mapped[dict | None] = mapped_column(JSON)
+    risks: Mapped[dict | None] = mapped_column(JSON)
     bull_case: Mapped[str | None] = mapped_column(Text)
     base_case: Mapped[str | None] = mapped_column(Text)
     bear_case: Mapped[str | None] = mapped_column(Text)
