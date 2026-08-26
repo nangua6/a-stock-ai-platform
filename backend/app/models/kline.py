@@ -1,7 +1,7 @@
 """K-line (OHLCV) data model."""
 from __future__ import annotations
 
-from sqlalchemy import BigInteger, Float, String, Integer
+from sqlalchemy import BigInteger, Float, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import BaseModel
@@ -25,8 +25,9 @@ class Kline(BaseModel):
     change_pct: Mapped[float | None] = mapped_column(Float)
     change_amount: Mapped[float | None] = mapped_column(Float)
     data_source: Mapped[str] = mapped_column(String(20), default="unknown")
-    available_time: Mapped[str | None] = mapped_column(String(30))  # When data became available
+    available_time: Mapped[str | None] = mapped_column(String(30))
 
     __table_args__ = (
+        UniqueConstraint("symbol", "trade_date", "timeframe", name="uq_kline_symbol_date_tf"),
         {"comment": "OHLCV candlestick data with time granularity"},
     )

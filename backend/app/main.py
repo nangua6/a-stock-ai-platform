@@ -73,7 +73,7 @@ def create_app() -> FastAPI:
         )
 
     # Register API routes
-    from app.api.v1 import health, market, trading, analysis, portfolio, risk, backtest
+    from app.api.v1 import health, market, trading, analysis, portfolio, risk, backtest, data
     app.include_router(health.router, prefix="/api/v1", tags=["Health"])
     app.include_router(market.router, prefix="/api/v1/market", tags=["Market Data"])
     app.include_router(trading.router, prefix="/api/v1/trading", tags=["Trading"])
@@ -81,6 +81,7 @@ def create_app() -> FastAPI:
     app.include_router(portfolio.router, prefix="/api/v1/portfolio", tags=["Portfolio"])
     app.include_router(risk.router, prefix="/api/v1/risk", tags=["Risk"])
     app.include_router(backtest.router, prefix="/api/v1/backtest", tags=["Backtest"])
+    app.include_router(data.router, prefix="/api/v1/data", tags=["Data Management"])
 
     return app
 

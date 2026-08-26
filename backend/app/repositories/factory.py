@@ -19,6 +19,9 @@ from app.repositories.trade_repo import TradeRepository
 from app.repositories.position_repo import PositionRepository
 from app.repositories.signal_repo import SignalRepository
 from app.repositories.kline_repo import KlineRepository
+from app.repositories.sync_job_repo import SyncJobRepository
+from app.repositories.technical_snapshot_repo import TechnicalSnapshotRepository
+from app.repositories.analysis_snapshot_repo import AnalysisSnapshotRepository
 
 
 class RepositoryFactory:
@@ -34,6 +37,9 @@ class RepositoryFactory:
         self._positions = None
         self._signals = None
         self._klines = None
+        self._sync_jobs = None
+        self._technical_snapshots = None
+        self._analysis_snapshots = None
 
     @property
     def users(self) -> UserRepository:
@@ -82,3 +88,21 @@ class RepositoryFactory:
         if self._klines is None:
             self._klines = KlineRepository(self._session)
         return self._klines
+
+    @property
+    def sync_jobs(self) -> SyncJobRepository:
+        if self._sync_jobs is None:
+            self._sync_jobs = SyncJobRepository(self._session)
+        return self._sync_jobs
+
+    @property
+    def technical_snapshots(self) -> TechnicalSnapshotRepository:
+        if self._technical_snapshots is None:
+            self._technical_snapshots = TechnicalSnapshotRepository(self._session)
+        return self._technical_snapshots
+
+    @property
+    def analysis_snapshots(self) -> AnalysisSnapshotRepository:
+        if self._analysis_snapshots is None:
+            self._analysis_snapshots = AnalysisSnapshotRepository(self._session)
+        return self._analysis_snapshots

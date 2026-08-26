@@ -1,17 +1,19 @@
-"""SQLAlchemy ORM models."""
-from app.models.base import BaseModel, TimestampMixin, UUIDMixin
+"""ORM models – all models must be imported here for Alembic discovery."""
+from app.models.base import BaseModel
 from app.models.user import User
 from app.models.account import Account
 from app.models.stock import Stock
-from app.models.order import Order, OrderSide, OrderStatus, OrderType
+from app.models.kline import Kline
+from app.models.order import Order
 from app.models.trade import Trade
 from app.models.position import Position
 from app.models.signal import Signal
-from app.models.kline import Kline
+from app.models.sync_job import DataSyncJob
+from app.models.technical_snapshot import TechnicalSnapshot
+from app.models.analysis_snapshot import AnalysisSnapshot
 
 __all__ = [
-    "BaseModel", "TimestampMixin", "UUIDMixin",
-    "User", "Account", "Stock",
-    "Order", "OrderSide", "OrderStatus", "OrderType",
-    "Trade", "Position", "Signal", "Kline",
+    "BaseModel", "User", "Account", "Stock", "Kline",
+    "Order", "Trade", "Position", "Signal",
+    "DataSyncJob", "TechnicalSnapshot", "AnalysisSnapshot",
 ]
