@@ -4,8 +4,10 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.config.settings import get_settings
+from app.risk.engine import RiskEngine
 
 router = APIRouter()
+_risk_engine = RiskEngine()
 
 
 @router.get("/config")
@@ -25,10 +27,23 @@ async def get_risk_config():
     }}
 
 
+@router.get("/status")
+async def get_risk_status():
+    """Get current risk engine runtime status."""
+    return {
+        "success": True,
+        "data": {
+            "daily_orders": _risk_engine._daily_orders,
+            "daily_loss": _risk_engine._daily_loss,
+            "peak_asset": _risk_engine._peak_asset,
+            "consecutive_losses": _risk_engine._consecutive_losses,
+        },
+    }
+
+
 @router.post("/kill-switch/{action}")
 async def toggle_kill_switch(action: str):
     """Toggle the global kill switch. Only 'activate' and 'deactivate' are valid."""
-    # In production, this would update .env or database
     if action == "activate":
         return {"success": True, "data": {"kill_switch": True, "message": "Kill switch ACTIVATED. All live orders blocked."}}
     elif action == "deactivate":
