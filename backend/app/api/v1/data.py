@@ -135,11 +135,13 @@ async def run_sync_full(req: SyncFullRequest):
 @router.get("/scheduler/status")
 async def get_scheduler_status():
     """Get scheduler status (if running)."""
-    from app.services.scheduler import Scheduler
-    # Return basic info – scheduler is a singleton managed by app lifecycle
+    from app.main import _scheduler
+    if _scheduler is not None:
+        return {"success": True, "data": _scheduler.get_status()}
     return {
         "success": True,
         "data": {
-            "note": "Scheduler status is available when app is running with scheduler enabled",
+            "running": False,
+            "note": "Scheduler not enabled. Set SCHEDULER_ENABLED=true to start.",
         },
     }

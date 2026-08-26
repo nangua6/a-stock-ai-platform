@@ -92,6 +92,12 @@ class StockAnalysisResult:
     analysis_timestamp: str = ""
     data_timestamp: str = ""
 
+    # Quote snapshot (from real quote data, NOT from scores)
+    current_price: Optional[float] = None   # None = unavailable
+    change_pct: Optional[float] = None
+    volume: Optional[int] = None
+    amount: Optional[float] = None
+
     # Scores
     technical: TechnicalScore = field(default_factory=TechnicalScore)
     fundamental_score: float = 0.0  # 0-100
@@ -117,6 +123,10 @@ class StockAnalysisResult:
             "name": self.name,
             "analysis_timestamp": self.analysis_timestamp,
             "data_timestamp": self.data_timestamp,
+            "current_price": self.current_price,
+            "change_pct": self.change_pct,
+            "volume": self.volume,
+            "amount": self.amount,
             "technical": self.technical.to_dict(),
             "fundamental_score": round(self.fundamental_score, 1),
             "risk": self.risk.to_dict(),

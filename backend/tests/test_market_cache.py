@@ -60,10 +60,25 @@ class TestMarketDataCache:
         assert stats["misses"] == 1
         assert stats["entries"] == 1
 
-    def test_custom_ttl(self):
-        self.cache.put("quote", {"price": 100}, symbol="A.SH", ttl_override=0.01)
-        time.sleep(0.02)
-        # Entry should be expired (but not yet stale = 3x TTL)
+    def test_custom_ttl(self, monkeypatch):
+        """Expired-but-not-stale entries should still be retrievable."""
+        base_time = 1000000.0
+        monkeypatch.setattr(time, "time", lambda: base_time)
+        self.cache.put("quote", {"price": 100}, symbol="A.SH", ttl_override=10.0)
+
+        # Advance past TTL (10s) but before stale threshold (30s = 3x TTL)
+        monkeypatch.setattr(time, "time", lambda: base_time + 15.0)
         entry = self.cache.get("quote", "A.SH")
         assert entry is not None  # Still available as stale
         assert entry.freshness == DataFreshness.STALE
+
+    def test_custom_ttl_stale_removes(self, monkeypatch):
+        """Entries past 3x TTL should be removed."""
+        base_time = 1000000.0
+        monkeypatch.setattr(time, "time", lambda: base_time)
+        self.cache.put("quote", {"price": 100}, symbol="A.SH", ttl_override=10.0)
+
+        # Advance past 3x TTL (30s) → UNAVAILABLE → removed
+        monkeypatch.setattr(time, "time", lambda: base_time + 35.0)
+        entry = self.cache.get("quote", "A.SH")
+        assert entry is None

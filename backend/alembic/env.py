@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from app.core.database import Base
 from app.models import (
     User, Account, Stock, Order, Trade, Position, Signal, Kline,
+    DataSyncJob, TechnicalSnapshot, AnalysisSnapshot,
 )
 from app.config.settings import get_settings
 

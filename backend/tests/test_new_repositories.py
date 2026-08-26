@@ -232,3 +232,95 @@ class TestRepositoryFactoryNewRepos:
     async def test_analysis_snapshots_property(self, repos):
         assert repos.analysis_snapshots is not None
         assert repos.analysis_snapshots is repos.analysis_snapshots
+
+
+# ── Upsert Idempotency Tests ──────────────────────────────────────────────
+
+class TestKlineUpsertIdempotency:
+    """Verify kline upsert produces no duplicates."""
+
+    @pytest.mark.asyncio
+    async def test_upsert_no_duplicate(self, repos):
+        """Same symbol+trade_date+timeframe should not create duplicates."""
+        data = {
+            "symbol": "600519.SH",
+            "trade_date": "2024-01-15",
+            "timeframe": "D",
+            "open": 1440.0,
+            "high": 1460.0,
+            "low": 1430.0,
+            "close": 1450.0,
+            "volume": 100000,
+            "amount": 145000000.0,
+            "data_source": "test",
+        }
+        await repos.klines.bulk_upsert([data])
+        await repos.klines.bulk_upsert([data])  # Same data again
+        count = await repos.klines.count(symbol="600519.SH")
+        assert count == 1
+
+    @pytest.mark.asyncio
+    async def test_upsert_updates_existing(self, repos):
+        """Upsert with same key should update, not insert."""
+        data1 = {
+            "symbol": "600519.SH",
+            "trade_date": "2024-01-15",
+            "timeframe": "D",
+            "open": 1440.0,
+            "high": 1460.0,
+            "low": 1430.0,
+            "close": 1450.0,
+            "volume": 100000,
+            "data_source": "test",
+        }
+        await repos.klines.bulk_upsert([data1])
+
+        data2 = {**data1, "close": 1480.0, "volume": 200000}
+        await repos.klines.bulk_upsert([data2])
+
+        klines = await repos.klines.get_by_symbol("600519.SH", limit=10)
+        assert len(klines) == 1
+        assert klines[0].close == 1480.0
+        assert klines[0].volume == 200000
+
+    @pytest.mark.asyncio
+    async def test_different_dates_not_duplicate(self, repos):
+        """Different trade_date should create separate records."""
+        for date in ["2024-01-15", "2024-01-16", "2024-01-17"]:
+            await repos.klines.bulk_upsert([{
+                "symbol": "600519.SH", "trade_date": date, "timeframe": "D",
+                "open": 100, "high": 110, "low": 90, "close": 105,
+                "volume": 1000, "data_source": "test",
+            }])
+        count = await repos.klines.count(symbol="600519.SH")
+        assert count == 3
+
+
+class TestTechnicalSnapshotUpsert:
+    @pytest.mark.asyncio
+    async def test_upsert_no_duplicate(self, repos):
+        await repos.technical_snapshots.upsert({
+            "symbol": "600519.SH", "trade_date": "2024-01-15", "ma5": 1450.0,
+        })
+        await repos.technical_snapshots.upsert({
+            "symbol": "600519.SH", "trade_date": "2024-01-15", "ma5": 1460.0,
+        })
+        count = await repos.technical_snapshots.count(symbol="600519.SH")
+        assert count == 1
+        snap = await repos.technical_snapshots.get_latest("600519.SH")
+        assert snap.ma5 == 1460.0
+
+
+class TestAnalysisSnapshotUpsert:
+    @pytest.mark.asyncio
+    async def test_upsert_no_duplicate(self, repos):
+        await repos.analysis_snapshots.upsert({
+            "symbol": "600519.SH", "trade_date": "2024-01-15", "recommendation": "HOLD",
+        })
+        await repos.analysis_snapshots.upsert({
+            "symbol": "600519.SH", "trade_date": "2024-01-15", "recommendation": "BUY_CANDIDATE",
+        })
+        count = await repos.analysis_snapshots.count(symbol="600519.SH")
+        assert count == 1
+        snap = await repos.analysis_snapshots.get_latest("600519.SH")
+        assert snap.recommendation == "BUY_CANDIDATE"

@@ -15,11 +15,17 @@ from app.config.settings import get_settings
 from app.core.database import close_db, init_db
 from app.core.exceptions import AppError
 from app.core.logging import setup_logging, get_logger
+from app.market.provider_manager import ProviderManager
+from app.market.mock_provider import MockMarketDataProvider
+from app.services.scheduler import Scheduler
+
+_scheduler: Scheduler | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan: startup and shutdown."""
+    global _scheduler
     settings = get_settings()
     setup_logging()
     logger = get_logger("main")
@@ -32,12 +38,60 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("Database init failed (may need to start PostgreSQL)", error=str(e))
 
+    # Start scheduler if enabled
+    if settings.scheduler_enabled:
+        try:
+            _scheduler = Scheduler()
+            _setup_scheduler_jobs(_scheduler, settings)
+            await _scheduler.start()
+            logger.info("Scheduler started", job_count=len(_scheduler._jobs))
+        except Exception as e:
+            logger.warning("Scheduler start failed", error=str(e))
+            _scheduler = None
+
     yield
 
     # Shutdown
+    if _scheduler is not None:
+        try:
+            await _scheduler.stop()
+            logger.info("Scheduler stopped")
+        except Exception as e:
+            logger.warning("Scheduler stop failed", error=str(e))
+
     await close_db()
     logger.info("Shutdown complete")
 
+
+def _setup_scheduler_jobs(scheduler: Scheduler, settings) -> None:
+    """Register default sync jobs with the scheduler."""
+    from app.core.database import get_db_context
+    from app.services.sync_service import SyncService
+
+    provider = ProviderManager(providers=[MockMarketDataProvider()])
+
+    async def sync_stock_list_job():
+        async with get_db_context() as session:
+            svc = SyncService(session, provider)
+            return await svc.sync_stock_list()
+
+    async def sync_klines_job():
+        # Default symbols for demo; in production this would come from DB
+        symbols = ["600519.SH", "000001.SZ", "000858.SZ"]
+        async with get_db_context() as session:
+            svc = SyncService(session, provider)
+            return await svc.sync_klines(symbols)
+
+    scheduler.add_job(
+        name="stock_list_sync",
+        func=sync_stock_list_job,
+        interval_seconds=settings.scheduler_stock_list_interval,
+    )
+    scheduler.add_job(
+        name="kline_sync",
+        func=sync_klines_job,
+        interval_seconds=settings.scheduler_kline_interval,
+    )
 
 def create_app() -> FastAPI:
     """Application factory."""

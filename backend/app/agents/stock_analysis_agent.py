@@ -78,6 +78,11 @@ class StockAnalysisAgent:
             name=quote.name if quote else "",
             analysis_timestamp=now_iso,
             data_timestamp=quote.timestamp if quote else "",
+            # Quote data – must come from real quote, not from scores
+            current_price=quote.price if quote and quote.price > 0 else None,
+            change_pct=quote.change_pct if quote else None,
+            volume=quote.volume if quote else None,
+            amount=quote.amount if quote else None,
             technical=technical,
             fundamental_score=0.0,  # No fundamental data in sandbox
             risk=risk,

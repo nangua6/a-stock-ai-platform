@@ -74,6 +74,11 @@ class Settings(BaseSettings):
     global_kill_switch: bool = True
     live_order_require_confirmation: bool = True
 
+    # ── Scheduler ────────────────────────────────────────────
+    scheduler_enabled: bool = False  # Enable background data sync scheduler
+    scheduler_stock_list_interval: int = 86400   # 24h in seconds
+    scheduler_kline_interval: int = 3600         # 1h in seconds
+
     # ── Risk Control Defaults ────────────────────────────────
     max_position_ratio: float = Field(default=0.20, description="最大单股仓位比例")
     max_single_trade_amount: float = Field(default=100000, description="单笔最大交易金额")
