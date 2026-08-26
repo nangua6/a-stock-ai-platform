@@ -48,6 +48,16 @@
 
 ### 风控系统
 - **RiskEngine**: 18 项检查
+
+### 数据持久化层
+- **Database**: PostgreSQL 16 + SQLAlchemy async ORM
+- **Models**: User, Account, Stock, Kline, Order, Trade, Position, Signal, DataSyncJob, TechnicalSnapshot, AnalysisSnapshot
+- **Repository**: 统一 CRUD + upsert 幂等
+- **MarketDataService**: Provider → DB 持久化桥接
+- **SyncService**: 完整数据同步管线（stock_list → kline → technical → analysis）
+- **DataQualityService**: 写入前数据校验（symbol/price/volume/timestamp）
+- **Scheduler**: asyncio 定时任务（可配置 interval + 交易日历）
+- **Alembic**: 数据库 migration 管理
   - Kill Switch、交易模式、手数、价格、涨跌停保护
   - 仓位限制、资金检查、单笔限额
   - 行业暴露限制、连续亏损冷却期
@@ -103,6 +113,20 @@ cp .env.example .env
 ### 3. 启动后端
 
 ```bash
+# 启动 PostgreSQL
+docker compose up -d postgres
+
+# 执行数据库 migration
+cd backend
+source .venv/bin/activate
+alembic upgrade head
+
+# 启动 API 服务
+uvicorn app.main:app --reload --port 8000
+```
+
+### 4. 运行测试
+```bash
 cd backend
 python3 -m venv .venv
 source .venv/bin/activate
@@ -115,10 +139,13 @@ uvicorn app.main:app --reload --port 8000
 ```bash
 cd backend
 source .venv/bin/activate
-# 单元测试（无需网络）
+# 单元测试（无需网络和数据库）
 pytest tests/ --ignore=tests/integration -v
-# 集成测试（需要真实网络）
-pytest tests/integration/ -v -m integration
+# PostgreSQL 集成测试（需要 docker compose up -d postgres）
+TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/astock_ai_test \
+  pytest tests/integration/test_postgres_persistence.py -v -m integration
+# AkShare 集成测试（需要真实网络）
+pytest tests/integration/test_akshare_integration.py -v -m integration
 ```
 
 ### 5. 访问 API
@@ -154,7 +181,7 @@ MIMO_MODEL=mimo-v2.5-pro
 
 ## 项目状态
 
-当前处于 **Phase 2+** — 核心基础设施已完成。
+当前处于 **Phase 3** — 数据持久化基础设施已完成。
 
 - ✅ 市场数据层（ProviderManager + AkShare + Mock + Cache）
 - ✅ 技术分析服务（16 个指标）
@@ -163,10 +190,73 @@ MIMO_MODEL=mimo-v2.5-pro
 - ✅ 选股引擎
 - ✅ 风控系统（18 项检查）
 - ✅ 回测引擎
-- ✅ 130 个单元测试
+- ✅ 数据库持久化（PostgreSQL + Repository + SyncService）
+- ✅ Alembic migration
+- ✅ Scheduler 定时同步
+- ✅ 数据质量校验
+- ✅ 215 个单元测试 + PostgreSQL 集成测试
 
 详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 了解完整开发计划。
 
 ## 许可证
 
 Private – All rights reserved.
+| `GET /data/status` | 数据源健康状态 |
+| `GET /data/sync/status` | 同步任务状态 |
+| `GET /data/sync/history` | 同步历史 |
+| `POST /data/sync/stock-list` | 触发股票列表同步 |
+| `POST /data/sync/klines` | 触发 K 线同步 |
+| `POST /data/sync/technical` | 触发技术指标计算 |
+| `POST /data/sync/analysis` | 触发分析快照 |
+| `POST /data/sync/full` | 触发完整管线 |
+| `GET /data/scheduler/status` | 调度器状态 |
+
+## Scheduler 配置
+
+Scheduler 默认关闭，通过环境变量启用：
+
+```bash
+# 启用 Scheduler
+SCHEDULER_ENABLED=true
+
+# 配置同步间隔（秒）
+SCHEDULER_STOCK_LIST_INTERVAL=86400   # 股票列表同步（24h）
+SCHEDULER_KLINE_INTERVAL=3600         # K 线同步（1h）
+SCHEDULER_KLINE_BATCH_SIZE=50         # 每批最大股票数
+```
+
+### 生产环境注意事项
+
+- Scheduler 默认关闭，需手动启用
+- 多 worker 部署时（`uvicorn --workers > 1`），需确保只启动一个 scheduler 实例
+- Scheduler 使用 `EnhancedTradingCalendar` 判断交易日，跳过周末和节假日
+- 交易日历 provider 可插拔，默认使用周末 fallback
+- 单只股票同步失败不影响整个批次
+
+## 数据库
+
+### 本地开发
+
+```bash
+# 启动 PostgreSQL
+docker compose up -d postgres
+
+# 执行 migration
+cd backend
+source .venv/bin/activate
+alembic upgrade head
+
+# 连接配置（默认）
+DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/astock_ai
+```
+
+### 测试数据库
+
+```bash
+# 创建测试数据库
+createdb astock_ai_test
+
+# 运行 PostgreSQL 集成测试
+TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/astock_ai_test \
+  pytest tests/integration/test_postgres_persistence.py -v -m integration
+```

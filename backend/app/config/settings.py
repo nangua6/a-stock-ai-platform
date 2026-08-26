@@ -78,6 +78,7 @@ class Settings(BaseSettings):
     scheduler_enabled: bool = False  # Enable background data sync scheduler
     scheduler_stock_list_interval: int = 86400   # 24h in seconds
     scheduler_kline_interval: int = 3600         # 1h in seconds
+    scheduler_kline_batch_size: int = 50          # Max symbols per kline sync batch
 
     # ── Risk Control Defaults ────────────────────────────────
     max_position_ratio: float = Field(default=0.20, description="最大单股仓位比例")

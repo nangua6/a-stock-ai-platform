@@ -67,20 +67,45 @@ def _setup_scheduler_jobs(scheduler: Scheduler, settings) -> None:
     """Register default sync jobs with the scheduler."""
     from app.core.database import get_db_context
     from app.services.sync_service import SyncService
+    from app.services.trading_calendar import EnhancedTradingCalendar
 
     provider = ProviderManager(providers=[MockMarketDataProvider()])
 
     async def sync_stock_list_job():
+        """Sync stock list from provider. Runs daily."""
+        if not await EnhancedTradingCalendar.should_run_sync():
+            return {"skipped": "not_weekday"}
         async with get_db_context() as session:
             svc = SyncService(session, provider)
             return await svc.sync_stock_list()
 
     async def sync_klines_job():
-        # Default symbols for demo; in production this would come from DB
-        symbols = ["600519.SH", "000001.SZ", "000858.SZ"]
+        """Sync klines for active stocks. Runs hourly during trading days."""
+        if not await EnhancedTradingCalendar.should_run_sync():
+            return {"skipped": "not_weekday"}
         async with get_db_context() as session:
+            from app.repositories.factory import RepositoryFactory
+            repos = RepositoryFactory(session)
+            stocks = await repos.stocks.get_active_stocks()
+            if not stocks:
+                return {"skipped": "no_stocks_in_db"}
+            symbols = [s.symbol for s in stocks[:settings.scheduler_kline_batch_size]]
             svc = SyncService(session, provider)
             return await svc.sync_klines(symbols)
+
+    async def sync_technical_job():
+        """Compute technical snapshots after klines are synced."""
+        if not await EnhancedTradingCalendar.should_run_sync():
+            return {"skipped": "not_weekday"}
+        async with get_db_context() as session:
+            from app.repositories.factory import RepositoryFactory
+            repos = RepositoryFactory(session)
+            stocks = await repos.stocks.get_active_stocks()
+            if not stocks:
+                return {"skipped": "no_stocks_in_db"}
+            symbols = [s.symbol for s in stocks[:settings.scheduler_kline_batch_size]]
+            svc = SyncService(session, provider)
+            return await svc.compute_technical_snapshots(symbols)
 
     scheduler.add_job(
         name="stock_list_sync",
@@ -91,6 +116,11 @@ def _setup_scheduler_jobs(scheduler: Scheduler, settings) -> None:
         name="kline_sync",
         func=sync_klines_job,
         interval_seconds=settings.scheduler_kline_interval,
+    )
+    scheduler.add_job(
+        name="technical_snapshot",
+        func=sync_technical_job,
+        interval_seconds=settings.scheduler_kline_interval + 300,  # 5 min after kline sync
     )
 
 def create_app() -> FastAPI:

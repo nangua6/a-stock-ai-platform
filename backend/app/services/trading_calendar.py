@@ -6,10 +6,14 @@ All time-dependent logic goes through this module.
 """
 from __future__ import annotations
 
-from datetime import datetime, time, timezone, timedelta
+from abc import ABC, abstractmethod
+from datetime import datetime, date, time, timezone, timedelta
 from typing import Optional
 
 import pytz
+from app.core.logging import get_logger
+
+logger = get_logger("trading_calendar")
 
 SHANGHAI_TZ = pytz.timezone("Asia/Shanghai")
 
@@ -82,3 +86,83 @@ class TradingCalendar:
             return False
         limit_pct = 0.20 if board in ("GEM", "STAR") else 0.10
         return (pre_close - price) / pre_close >= limit_pct - 0.001
+
+
+class TradingCalendarProvider(ABC):
+    """Interface for trading calendar data sources.
+
+    Implementations can use:
+    - AkShare (exchange calendar API)
+    - Static holiday lists
+    - Database-stored calendar
+    - External API
+    """
+
+    @abstractmethod
+    async def is_trading_day(self, d: date) -> bool:
+        """Check if a specific date is an A-share trading day."""
+        ...
+
+    @abstractmethod
+    async def get_trading_days(self, start: date, end: date) -> list[date]:
+        """Get list of trading days in a date range."""
+        ...
+
+
+class WeekendFallbackCalendar(TradingCalendarProvider):
+    """Fallback calendar that only checks weekends (no holiday awareness).
+
+    Used when no external calendar data source is available.
+    WARNING: Does NOT account for Chinese public holidays or make-up workdays.
+    """
+
+    async def is_trading_day(self, d: date) -> bool:
+        return d.weekday() < 5  # Mon-Fri
+
+    async def get_trading_days(self, start: date, end: date) -> list[date]:
+        days = []
+        current = start
+        while current <= end:
+            if current.weekday() < 5:
+                days.append(current)
+            current += timedelta(days=1)
+        return days
+
+
+class EnhancedTradingCalendar:
+    """Trading calendar with pluggable provider.
+
+    Falls back to WeekendFallbackCalendar if no provider is set.
+    """
+
+    _provider: Optional[TradingCalendarProvider] = None
+
+    @classmethod
+    def set_provider(cls, provider: TradingCalendarProvider) -> None:
+        cls._provider = provider
+        logger.info("trading_calendar_provider_set", provider=type(provider).__name__)
+
+    @classmethod
+    def get_provider(cls) -> TradingCalendarProvider:
+        if cls._provider is None:
+            cls._provider = WeekendFallbackCalendar()
+        return cls._provider
+
+    @classmethod
+    async def is_trading_day(cls, d: Optional[date] = None) -> bool:
+        d = d or TradingCalendar.now_shanghai().date()
+        return await cls.get_provider().is_trading_day(d)
+
+    @classmethod
+    async def is_today_trading_day(cls) -> bool:
+        today = TradingCalendar.now_shanghai().date()
+        return await cls.is_trading_day(today)
+
+    @classmethod
+    async def should_run_sync(cls) -> bool:
+        """Check if sync should run: trading day + within reasonable hours."""
+        now = TradingCalendar.now_shanghai()
+        if not await cls.is_trading_day(now.date()):
+            return False
+        # Allow sync from 9:00 to 18:00 Shanghai time
+        return time(9, 0) <= now.time() <= time(18, 0)
