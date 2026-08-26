@@ -1,0 +1,19 @@
+# a-stock-ai-platform
+.env
+.env.local
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+node_modules/
+.next/
+.venv/
+venv/
+data/raw/
+data/cache/
+*.db
+*.sqlite
+.DS_Store
+*.log
