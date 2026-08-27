@@ -11,16 +11,12 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from app.agents.investment_research_agent import InvestmentResearchAgent
-from app.agents.structured_output import StockAnalysisResponse
 from app.tools.builtin import register_builtin_tools
 from app.core.logging import get_logger
 
 logger = get_logger("api.agent")
 
 router = APIRouter()
-
-# Ensure tools are registered on module load
-register_builtin_tools()
 
 # Lazy singleton — created once, reused
 _agent: Optional[InvestmentResearchAgent] = None
@@ -29,6 +25,8 @@ _agent: Optional[InvestmentResearchAgent] = None
 def _get_agent() -> InvestmentResearchAgent:
     global _agent
     if _agent is None:
+        # Register tools with mode-aware provider
+        register_builtin_tools()
         _agent = InvestmentResearchAgent()
     return _agent
 
@@ -44,7 +42,7 @@ async def analyze_stock(request: AgentAnalyzeRequest):
     """
     Run full AI investment research analysis on a stock.
 
-    Pipeline: Tools → LLM → Structured Output → Validation → Risk Check
+    Pipeline: Tools -> LLM -> Structured Output -> Validation -> Risk Check
     """
     agent = _get_agent()
 

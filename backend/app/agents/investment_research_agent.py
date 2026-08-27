@@ -24,6 +24,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from app.ai.client import LLMMessage, LLMProvider, LLMResponse, LLMTool, get_llm_provider
 from app.agents.structured_output import (
     DataQuality,
+    EvidenceItem,
     Recommendation,
     StockAnalysisResponse,
     parse_llm_analysis,
@@ -135,8 +136,13 @@ class InvestmentResearchAgent:
         self,
         llm: Optional[LLMProvider] = None,
         registry: Optional[ToolRegistry] = None,
+        llm_mode: Optional[str] = None,
     ):
-        self.llm = llm or get_llm_provider()
+        if llm:
+            self.llm = llm
+        else:
+            from app.market.factory import create_llm_provider
+            self.llm = create_llm_provider(mode=llm_mode)
         self.registry = registry or get_tool_registry()
 
     async def analyze_stock(
@@ -203,6 +209,9 @@ class InvestmentResearchAgent:
                 # Step 5: Validate data truthfulness
                 response = self._validate_data_truthfulness(response, tool_results)
                 trace.validation_result = "VALID"
+
+            # Step 5.5: Build evidence
+            response.evidence = self._build_evidence(tool_results, trace)
 
             # Step 6: Apply risk constraints
             response = self._apply_risk_constraints(response, tool_results)
@@ -435,6 +444,79 @@ class InvestmentResearchAgent:
             response.confidence = 0.0
 
         return response
+
+
+    def _build_evidence(self, tool_results: Dict[str, Any], trace: AgentTrace) -> list:
+        """Build evidence items from tool results."""
+        evidence = []
+
+        # Market data evidence
+        quote = tool_results.get('get_quote', {})
+        if isinstance(quote, dict) and quote.get('status') == 'OK':
+            evidence.append(EvidenceItem(
+                type='MARKET',
+                source=quote.get('source', 'unknown'),
+                citation_id=f"quote_{quote.get('symbol', 'unknown')}",
+                timestamp=quote.get('timestamp', ''),
+                summary=f"行情数据: {quote.get('symbol', '')} price available",
+            ))
+
+        # Technical evidence
+        tech = tool_results.get('analyze_technical', {})
+        if isinstance(tech, dict) and tech.get('status') == 'OK':
+            evidence.append(EvidenceItem(
+                type='TECHNICAL',
+                source='technical_analysis_service',
+                citation_id=f"tech_{tech.get('symbol', 'unknown')}",
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                summary=f"技术指标: {tech.get('kline_count', 0)} 根K线",
+            ))
+
+        # Risk evidence
+        risk = tool_results.get('get_stock_risk', {})
+        if isinstance(risk, dict) and risk.get('status') == 'OK':
+            evidence.append(EvidenceItem(
+                type='RISK',
+                source='risk_engine',
+                citation_id=f"risk_{risk.get('symbol', 'unknown')}",
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                summary=f"风控检查: {risk.get('risk_level', 'unknown')}",
+            ))
+
+        # Financial evidence
+        fin = tool_results.get('get_financial_data', {})
+        if isinstance(fin, dict) and fin.get('status') in ('OK', 'PARTIAL'):
+            evidence.append(EvidenceItem(
+                type='FINANCIAL',
+                source=fin.get('source', 'unknown'),
+                citation_id=f"financial_{fin.get('symbol', 'unknown')}",
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                summary=f"财务数据: {fin.get('status', 'unknown')}",
+            ))
+
+        # News evidence
+        news = tool_results.get('search_news', {})
+        if isinstance(news, dict) and news.get('status') == 'OK':
+            evidence.append(EvidenceItem(
+                type='NEWS',
+                source='news_search',
+                citation_id=f"news_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}",
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                summary=f"新闻: {news.get('total', 0)} 条",
+            ))
+
+        # Announcement evidence
+        ann = tool_results.get('get_announcements', {})
+        if isinstance(ann, dict) and ann.get('status') == 'OK':
+            evidence.append(EvidenceItem(
+                type='ANNOUNCEMENT',
+                source='announcement_search',
+                citation_id=f"announcement_{ann.get('symbol', 'unknown')}",
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                summary=f"公告: {ann.get('total', 0)} 条",
+            ))
+
+        return evidence
 
     def _build_fallback_response(
         self,

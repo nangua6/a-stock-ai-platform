@@ -33,6 +33,15 @@ class DataQuality(str, Enum):
 
 # ── Main Analysis Response ───────────────────────────────────────────────────
 
+class EvidenceItem(BaseModel):
+    """A piece of evidence supporting the analysis."""
+    type: str = Field(default='UNKNOWN', description='Evidence type: MARKET/TECHNICAL/FINANCIAL/NEWS/ANNOUNCEMENT/RISK')
+    source: str = Field(default='', description='Data source')
+    citation_id: str = Field(default='', description='Unique citation identifier')
+    timestamp: str = Field(default='', description='When the evidence was collected')
+    summary: str = Field(default='', description='Brief summary of evidence')
+
+
 class StockAnalysisResponse(BaseModel):
     """
     The canonical AI analysis output.
@@ -73,6 +82,9 @@ class StockAnalysisResponse(BaseModel):
     # Data provenance
     data_quality: DataQuality = Field(default=DataQuality.UNAVAILABLE, description="Data quality level")
     data_source: str = Field(default="", description="Data source identifier")
+
+    # Evidence and citations
+    evidence: List[EvidenceItem] = Field(default_factory=list, description="Evidence supporting the analysis")
 
     @field_validator("recommendation", mode="before")
     @classmethod

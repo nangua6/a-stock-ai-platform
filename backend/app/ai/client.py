@@ -145,13 +145,31 @@ class OpenAICompatibleProvider(LLMProvider):
         raise last_error  # type: ignore[misc]
 
 
-def get_llm_provider() -> LLMProvider:
-    """Factory to get the configured LLM provider."""
+def get_llm_provider(mode: str | None = None) -> LLMProvider:
+    """
+    Factory to get the configured LLM provider.
+
+    mode: 'mock' or 'mimo'. If None, reads from settings.llm_mode.
+    """
     settings = get_settings()
+    effective_mode = mode or settings.llm_mode.value
+
+    if effective_mode == "mock":
+        from app.ai.mock_provider import MockLLMProvider
+        logger.info("Using MockLLMProvider", mode=effective_mode)
+        return MockLLMProvider()
+
+    # Real MiMo provider
     if not settings.mimo_api_key:
-        logger.warning("MIMO_API_KEY not set – LLM calls will fail")
+        logger.warning("MIMO_API_KEY not set – falling back to mock")
+        from app.ai.mock_provider import MockLLMProvider
+        return MockLLMProvider()
+
+    logger.info("Using MiMo provider", model=settings.mimo_model, base_url=settings.mimo_base_url)
     return OpenAICompatibleProvider(
         base_url=settings.mimo_base_url,
         api_key=settings.mimo_api_key,
         model=settings.mimo_model,
+        timeout=120.0,
+        max_retries=3,
     )

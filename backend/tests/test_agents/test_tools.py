@@ -2,6 +2,7 @@
 import pytest
 
 from app.tools.registry.base import ToolRegistry, ToolPermission, get_tool_registry
+from app.market.factory import create_provider, create_llm_provider
 from app.tools.builtin import (
     ALL_BUILTIN_TOOLS,
     register_builtin_tools,
@@ -10,6 +11,9 @@ from app.tools.builtin import (
     STOCK_SCREENING_TOOL,
     RISK_TOOL,
     PORTFOLIO_TOOL,
+    FINANCIAL_DATA_TOOL,
+    NEWS_SEARCH_TOOL,
+    ANNOUNCEMENT_TOOL,
 )
 
 
@@ -25,14 +29,14 @@ class TestToolRegistry:
         for tool in ALL_BUILTIN_TOOLS:
             registry.register(tool)
         tools = registry.list_tools()
-        assert len(tools) == 5
+        assert len(tools) == 8
 
     def test_list_by_permission(self):
         registry = ToolRegistry()
         for tool in ALL_BUILTIN_TOOLS:
             registry.register(tool)
         read_tools = registry.list_tools(permission=ToolPermission.READ_ONLY)
-        assert len(read_tools) == 5  # All are READ_ONLY
+        assert len(read_tools) == 8  # All are READ_ONLY
 
     def test_to_openai_functions(self):
         registry = ToolRegistry()
@@ -161,3 +165,74 @@ class TestToolExecution:
         result = await STOCK_SCREENING_TOOL.handler(criteria="trend_strong", top_n=5)
         assert result["status"] == "OK"
         assert "candidates" in result
+
+
+class TestNewTools:
+    """Tests for FinancialDataTool, NewsSearchTool, AnnouncementTool."""
+
+    @pytest.mark.asyncio
+    async def test_financial_data_tool(self):
+        result = await FINANCIAL_DATA_TOOL.handler(symbol="600519.SH")
+        assert result["status"] in ("OK", "PARTIAL", "UNAVAILABLE")
+        assert result["symbol"] == "600519.SH"
+
+    @pytest.mark.asyncio
+    async def test_financial_data_no_symbol(self):
+        result = await FINANCIAL_DATA_TOOL.handler(symbol="")
+        assert result["error"] == "INVALID_ARGUMENT"
+
+    @pytest.mark.asyncio
+    async def test_news_search_tool(self):
+        result = await NEWS_SEARCH_TOOL.handler(query="贵州茅台", symbols="600519.SH")
+        assert result["status"] in ("OK", "UNAVAILABLE")
+
+    @pytest.mark.asyncio
+    async def test_announcement_tool(self):
+        result = await ANNOUNCEMENT_TOOL.handler(symbol="600519.SH")
+        assert result["status"] in ("OK", "UNAVAILABLE")
+        assert result["symbol"] == "600519.SH"
+
+    @pytest.mark.asyncio
+    async def test_announcement_no_symbol(self):
+        result = await ANNOUNCEMENT_TOOL.handler(symbol="")
+        assert result["error"] == "INVALID_ARGUMENT"
+
+    def test_financial_tool_schema(self):
+        schema = FINANCIAL_DATA_TOOL.parameters
+        assert "symbol" in schema["properties"]
+        assert schema["required"] == ["symbol"]
+
+    def test_news_tool_schema(self):
+        schema = NEWS_SEARCH_TOOL.parameters
+        assert "query" in schema["properties"]
+        assert "symbols" in schema["properties"]
+
+    def test_announcement_tool_schema(self):
+        schema = ANNOUNCEMENT_TOOL.parameters
+        assert "symbol" in schema["properties"]
+        assert schema["required"] == ["symbol"]
+
+
+class TestProviderFactory:
+    def test_create_mock_provider(self):
+        from app.market.factory import create_provider
+        provider = create_provider(mode="mock")
+        assert provider is not None
+
+    def test_create_real_provider_fallback(self):
+        from app.market.factory import create_provider
+        # In sandbox, AkShare is not available, should fallback to mock
+        provider = create_provider(mode="real")
+        assert provider is not None
+
+    def test_create_mock_llm(self):
+        from app.market.factory import create_llm_provider
+        from app.ai.mock_provider import MockLLMProvider
+        llm = create_llm_provider(mode="mock")
+        assert isinstance(llm, MockLLMProvider)
+
+    def test_create_mimo_llm(self):
+        from app.market.factory import create_llm_provider
+        from app.ai.client import OpenAICompatibleProvider
+        llm = create_llm_provider(mode="mimo")
+        assert isinstance(llm, OpenAICompatibleProvider)

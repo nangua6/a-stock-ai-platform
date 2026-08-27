@@ -412,7 +412,32 @@ function AgentAnalysisView({ response, trace }: { response: AgentAnalysisRespons
         </div>
       </div>
 
+      {/* Evidence */}
+      {response.evidence && response.evidence.length > 0 && (
+        <div className="card">
+          <div className="card-header">分析证据</div>
+          <div className="card-body">
+            <div className="space-y-2">
+              {response.evidence.map((ev, i) => (
+                <div key={i} className="flex items-start gap-3 p-2 bg-neutral-50 rounded">
+                  <span className={`badge text-xs ${ev.type === 'MARKET' ? 'bg-blue-100 text-blue-700' : ev.type === 'TECHNICAL' ? 'bg-purple-100 text-purple-700' : ev.type === 'RISK' ? 'bg-amber-100 text-amber-700' : ev.type === 'FINANCIAL' ? 'bg-green-100 text-green-700' : 'bg-neutral-100 text-neutral-700'}`}>
+                    {ev.type}
+                  </span>
+                  <div className="flex-1">
+                    <div className="text-sm">{ev.summary}</div>
+                    <div className="text-xs text-neutral-400 mt-0.5">
+                      {ev.source} · {ev.citation_id}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Agent Trace */}
+
       {trace && (
         <div className="card">
           <div className="card-header">Agent 执行追踪</div>

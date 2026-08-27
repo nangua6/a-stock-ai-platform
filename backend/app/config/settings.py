@@ -21,6 +21,16 @@ class BrokerProvider(str, Enum):
     PTRADE = "ptrade"
 
 
+class LLMMode(str, Enum):
+    MOCK = "mock"
+    MIMO = "mimo"
+
+
+class MarketDataMode(str, Enum):
+    MOCK = "mock"
+    REAL = "real"
+
+
 class MarketDataProviderName(str, Enum):
     TUSHARE = "tushare"
     AKSHARE = "akshare"
@@ -54,6 +64,8 @@ class Settings(BaseSettings):
     mimo_api_key: str = ""
     mimo_base_url: str = "https://api.mimo.com/v1"
     mimo_model: str = "mimo-v2.5-pro"
+    llm_mode: LLMMode = LLMMode.MOCK
+    market_data_mode: MarketDataMode = MarketDataMode.MOCK
 
     # ── Market Data ──────────────────────────────────────────
     market_data_provider: MarketDataProviderName = MarketDataProviderName.TUSHARE

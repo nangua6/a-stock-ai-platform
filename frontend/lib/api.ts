@@ -146,6 +146,14 @@ export const tradingApi = {
 
 // ── Agent API (MiMo Investment Research) ──────────────────────────────────
 
+export interface EvidenceItem {
+  type: string
+  source: string
+  citation_id: string
+  timestamp: string
+  summary: string
+}
+
 export interface AgentAnalysisResponse {
   schema_version: string
   symbol: string
@@ -166,6 +174,7 @@ export interface AgentAnalysisResponse {
   key_risks: string[]
   data_quality: string
   data_source: string
+  evidence: EvidenceItem[]
 }
 
 export interface AgentTrace {
