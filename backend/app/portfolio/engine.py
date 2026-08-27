@@ -21,6 +21,7 @@ class PortfolioSnapshot:
     market_value: float = 0.0
     realized_pnl: float = 0.0
     unrealized_pnl: float = 0.0
+    unrealized_pnl_pct: float = 0.0
     daily_pnl: float = 0.0
     daily_pnl_pct: float = 0.0
     max_drawdown: float = 0.0

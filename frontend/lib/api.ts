@@ -143,4 +143,56 @@ export const tradingApi = {
   getPositions: () => get<import('./types').Position[]>('/trading/positions'),
 }
 
+
+// ── Agent API (MiMo Investment Research) ──────────────────────────────────
+
+export interface AgentAnalysisResponse {
+  schema_version: string
+  symbol: string
+  name: string
+  analysis_timestamp: string
+  data_timestamp: string
+  current_price: number | null
+  change_pct: number | null
+  trend: string
+  technical_score: number
+  fundamental_score: number
+  risk_score: number
+  overall_score: number
+  recommendation: string
+  confidence: number
+  bull_case: string[]
+  bear_case: string[]
+  key_risks: string[]
+  data_quality: string
+  data_source: string
+}
+
+export interface AgentTrace {
+  trace_id: string
+  request_id: string
+  model: string
+  latency_ms: number
+  tool_calls: number
+  tool_call_details: Array<{
+    tool: string
+    status: string
+    latency_ms: number
+  }>
+  iterations: number
+  validation_result: string
+  final_recommendation: string
+  error: string | null
+}
+
+export interface AgentAnalyzeResult {
+  data: AgentAnalysisResponse
+  trace: AgentTrace
+}
+
+export const agentApi = {
+  analyze: (symbol: string, question?: string) =>
+    post<AgentAnalyzeResult>('/agent/analyze', { symbol, question }),
+}
+
 export { ApiError }
