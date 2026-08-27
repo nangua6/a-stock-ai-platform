@@ -25,7 +25,7 @@ class Kline(BaseModel):
     change_pct: Mapped[float | None] = mapped_column(Float)
     change_amount: Mapped[float | None] = mapped_column(Float)
     data_source: Mapped[str] = mapped_column(String(20), default="unknown")
-    available_time: Mapped[str | None] = mapped_column(String(30))
+    available_time: Mapped[str | None] = mapped_column(String(50))
 
     __table_args__ = (
         UniqueConstraint("symbol", "trade_date", "timeframe", name="uq_kline_symbol_date_tf"),

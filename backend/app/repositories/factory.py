@@ -22,6 +22,7 @@ from app.repositories.kline_repo import KlineRepository
 from app.repositories.sync_job_repo import SyncJobRepository
 from app.repositories.technical_snapshot_repo import TechnicalSnapshotRepository
 from app.repositories.analysis_snapshot_repo import AnalysisSnapshotRepository
+from app.repositories.watchlist_repo import WatchlistRepository
 
 
 class RepositoryFactory:
@@ -40,6 +41,7 @@ class RepositoryFactory:
         self._sync_jobs = None
         self._technical_snapshots = None
         self._analysis_snapshots = None
+        self._watchlist = None
 
     @property
     def users(self) -> UserRepository:
@@ -106,3 +108,9 @@ class RepositoryFactory:
         if self._analysis_snapshots is None:
             self._analysis_snapshots = AnalysisSnapshotRepository(self._session)
         return self._analysis_snapshots
+
+    @property
+    def watchlist(self) -> WatchlistRepository:
+        if self._watchlist is None:
+            self._watchlist = WatchlistRepository(self._session)
+        return self._watchlist

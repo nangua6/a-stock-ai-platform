@@ -29,7 +29,7 @@ from app.market.mock_provider import MockMarketDataProvider
 # Skip if no PostgreSQL available
 POSTGRES_URL = os.environ.get(
     "TEST_DATABASE_URL",
-    "postgresql+asyncpg://postgres:postgres@localhost:5432/astock_ai_test",
+    "postgresql+asyncpg://postgres:postgres@localhost:5433/astock_ai",
 )
 
 pytestmark = pytest.mark.integration
@@ -91,7 +91,7 @@ class TestPostgresConnection:
         expected = {
             "users", "accounts", "stocks", "klines", "orders", "trades",
             "positions", "signals", "data_sync_jobs", "technical_snapshots",
-            "analysis_snapshots",
+            "analysis_snapshots", "watchlist_items",
         }
         assert expected.issubset(tables), f"Missing tables: {expected - tables}"
 
@@ -263,16 +263,19 @@ class TestPostgresSyncJob:
 class TestPostgresTransaction:
     @pytest.mark.asyncio
     async def test_rollback_on_error(self, pg_session):
-        """Transaction should rollback on error."""
+        """Transaction should rollback on error without losing committed data."""
         repos = RepositoryFactory(pg_session)
         user = await repos.users.create({
             "username": f"rollback_{uuid.uuid4().hex[:6]}",
             "email": f"rollback_{uuid.uuid4().hex[:6]}@example.com",
             "hashed_password": "hashed",
         })
-        await pg_session.flush()
+        await pg_session.commit()
 
-        # Simulate error - try to create duplicate unique field
+        # Save id before rollback expires attributes
+        user_id = user.id
+
+        # Simulate error in a new transaction – duplicate unique field
         try:
             await repos.users.create({
                 "username": user.username,  # Duplicate
@@ -283,8 +286,8 @@ class TestPostgresTransaction:
         except Exception:
             await pg_session.rollback()
 
-        # Original user should still exist
-        found = await repos.users.get_by_id(user.id)
+        # Committed user should still exist
+        found = await repos.users.get_by_id(user_id)
         assert found is not None
 
 
@@ -335,3 +338,107 @@ class TestPostgresFullPipeline:
         count2 = len(await RepositoryFactory(pg_session).klines.get_by_symbol("600519.SH", limit=200))
 
         assert count1 == count2
+
+
+# ── Watchlist Tests ────────────────────────────────────────────────────────
+
+class TestPostgresWatchlist:
+    @pytest.mark.asyncio
+    async def test_add_watchlist(self, repos):
+        """Add a stock to watchlist."""
+        user = await repos.users.create({
+            "username": f"wl_{uuid.uuid4().hex[:6]}",
+            "email": f"wl_{uuid.uuid4().hex[:6]}@example.com",
+            "hashed_password": "hashed",
+        })
+        item = await repos.watchlist.add_item(user.id, "600519.SH", "贵州茅台")
+        assert item.symbol == "600519.SH"
+        assert item.name == "贵州茅台"
+        assert item.id is not None
+
+    @pytest.mark.asyncio
+    async def test_duplicate_add_idempotent(self, repos):
+        """Adding same stock twice should return same record."""
+        user = await repos.users.create({
+            "username": f"wl_{uuid.uuid4().hex[:6]}",
+            "email": f"wl_{uuid.uuid4().hex[:6]}@example.com",
+            "hashed_password": "hashed",
+        })
+        item1 = await repos.watchlist.add_item(user.id, "600519.SH")
+        item2 = await repos.watchlist.add_item(user.id, "600519.SH")
+        assert item1.id == item2.id
+
+    @pytest.mark.asyncio
+    async def test_remove_watchlist(self, repos):
+        """Remove a stock from watchlist."""
+        user = await repos.users.create({
+            "username": f"wl_{uuid.uuid4().hex[:6]}",
+            "email": f"wl_{uuid.uuid4().hex[:6]}@example.com",
+            "hashed_password": "hashed",
+        })
+        await repos.watchlist.add_item(user.id, "600519.SH")
+        removed = await repos.watchlist.remove_item(user.id, "600519.SH")
+        assert removed is True
+        exists = await repos.watchlist.is_in_watchlist(user.id, "600519.SH")
+        assert exists is False
+
+    @pytest.mark.asyncio
+    async def test_remove_nonexistent(self, repos):
+        """Removing non-existent stock should return False."""
+        user = await repos.users.create({
+            "username": f"wl_{uuid.uuid4().hex[:6]}",
+            "email": f"wl_{uuid.uuid4().hex[:6]}@example.com",
+            "hashed_password": "hashed",
+        })
+        removed = await repos.watchlist.remove_item(user.id, "999999.SH")
+        assert removed is False
+
+    @pytest.mark.asyncio
+    async def test_get_by_user(self, repos):
+        """Get all watchlist items for a user."""
+        user = await repos.users.create({
+            "username": f"wl_{uuid.uuid4().hex[:6]}",
+            "email": f"wl_{uuid.uuid4().hex[:6]}@example.com",
+            "hashed_password": "hashed",
+        })
+        await repos.watchlist.add_item(user.id, "600519.SH", "贵州茅台")
+        await repos.watchlist.add_item(user.id, "000858.SZ", "五粮液")
+        items = await repos.watchlist.get_by_user(user.id)
+        assert len(items) == 2
+        symbols = {i.symbol for i in items}
+        assert "600519.SH" in symbols
+        assert "000858.SZ" in symbols
+
+    @pytest.mark.asyncio
+    async def test_unique_constraint(self, repos):
+        """Unique(user_id, symbol) prevents duplicates at DB level."""
+        user = await repos.users.create({
+            "username": f"wl_{uuid.uuid4().hex[:6]}",
+            "email": f"wl_{uuid.uuid4().hex[:6]}@example.com",
+            "hashed_password": "hashed",
+        })
+        await repos.watchlist.add_item(user.id, "600519.SH")
+        # Second add should not create duplicate
+        await repos.watchlist.add_item(user.id, "600519.SH")
+        items = await repos.watchlist.get_by_user(user.id)
+        assert len(items) == 1
+
+    @pytest.mark.asyncio
+    async def test_different_users_independent(self, repos):
+        """Different users can have same stock in watchlist."""
+        user1 = await repos.users.create({
+            "username": f"wl1_{uuid.uuid4().hex[:6]}",
+            "email": f"wl1_{uuid.uuid4().hex[:6]}@example.com",
+            "hashed_password": "hashed",
+        })
+        user2 = await repos.users.create({
+            "username": f"wl2_{uuid.uuid4().hex[:6]}",
+            "email": f"wl2_{uuid.uuid4().hex[:6]}@example.com",
+            "hashed_password": "hashed",
+        })
+        await repos.watchlist.add_item(user1.id, "600519.SH")
+        await repos.watchlist.add_item(user2.id, "600519.SH")
+        items1 = await repos.watchlist.get_by_user(user1.id)
+        items2 = await repos.watchlist.get_by_user(user2.id)
+        assert len(items1) == 1
+        assert len(items2) == 1

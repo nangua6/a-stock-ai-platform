@@ -1,116 +1,246 @@
-'use client';
+'use client'
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react'
+import Link from 'next/link'
+import { marketApi, analysisApi } from '@/lib/api'
+import type { MarketOverview, QuoteData, ScreeningCandidate, DataMeta } from '@/lib/types'
+import { DataStateBanner, Skeleton } from '@/components/DataState'
+import { MockBadge } from '@/components/MockBadge'
+import {
+  formatPrice, formatPct, formatAmount, formatVolume,
+  changeColor, changeBg, scoreColor, recommendationLabel,
+} from '@/lib/utils'
 
-interface SystemStatus {
-  trading_mode: string;
-  kill_switch: boolean;
-  market_phase: string;
-  broker_provider: string;
-  risk_params: Record<string, number>;
-}
+export default function MarketDashboard() {
+  const [overview, setOverview] = useState<MarketOverview | null>(null)
+  const [aiPicks, setAiPicks] = useState<ScreeningCandidate[]>([])
+  const [hotQuotes, setHotQuotes] = useState<QuoteData[]>([])
+  const [meta, setMeta] = useState<DataMeta>({ state: 'LOADING' })
+  const [aiMeta, setAiMeta] = useState<DataMeta>({ state: 'LOADING' })
 
-export default function Home() {
-  const [status, setStatus] = useState<SystemStatus | null>(null);
-  const [health, setHealth] = useState<any>(null);
+  const fetchOverview = useCallback(async () => {
+    try {
+      const data = await marketApi.getOverview()
+      setOverview(data)
+      setMeta({ state: 'SUCCESS', timestamp: data.timestamp, source: data.data_source })
+    } catch (err) {
+      setMeta({ state: 'ERROR', error: err instanceof Error ? err.message : 'Failed' })
+    }
+  }, [])
+
+  const fetchAiPicks = useCallback(async () => {
+    try {
+      const result = await analysisApi.findCandidates('趋势最强', 5)
+      setAiPicks(result.candidates)
+      // Fetch quotes for AI picks
+      if (result.candidates.length > 0) {
+        const symbols = result.candidates.map(c => c.symbol)
+        const quotes = await marketApi.getQuotes(symbols)
+        setHotQuotes(quotes)
+      }
+      setAiMeta({ state: 'SUCCESS', source: 'api' })
+    } catch {
+      setAiMeta({ state: 'ERROR', error: 'AI analysis unavailable' })
+    }
+  }, [])
 
   useEffect(() => {
-    fetch('/api/v1/status').then(r => r.json()).then(setStatus).catch(() => {});
-    fetch('/api/v1/health').then(r => r.json()).then(setHealth).catch(() => {});
-  }, []);
+    fetchOverview()
+    fetchAiPicks()
+    const timer = setInterval(fetchOverview, 30000)
+    return () => clearInterval(timer)
+  }, [fetchOverview, fetchAiPicks])
+
+  const indices = overview?.indices ? Object.entries(overview.indices) : []
 
   return (
-    <main style={{ padding: '2rem', fontFamily: 'system-ui, sans-serif', maxWidth: '1200px', margin: '0 auto' }}>
-      <h1 style={{ fontSize: '2rem', marginBottom: '1rem', color: '#1a1a2e' }}>
-        📊 A股智能投研平台
-      </h1>
-      <p style={{ color: '#666', marginBottom: '2rem' }}>
-        A-share Intelligent Investment Research & Automated Trading System
-      </p>
-
-      {/* System Status Card */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '1rem', marginBottom: '2rem' }}>
-        <Card title="系统状态" value={health?.status || 'loading...'} color="#10b981" />
-        <Card title="交易模式" value={status?.trading_mode || '...'} color="#3b82f6" />
-        <Card title="Kill Switch" value={status?.kill_switch ? '🔴 激活' : '🟢 关闭'} color={status?.kill_switch ? '#ef4444' : '#10b981'} />
-        <Card title="市场阶段" value={status?.market_phase || '...'} color="#8b5cf6" />
+    <div className="max-w-7xl mx-auto px-3 py-3 space-y-3">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-lg font-bold text-neutral-900">A股市场</h1>
+          <div className="flex items-center gap-2 text-xs text-neutral-500">
+            <span>{overview ? '交易中' : '—'}</span>
+            <span>·</span>
+            <span>{overview?.timestamp ? new Date(overview.timestamp).toLocaleString('zh-CN') : '—'}</span>
+            <MockBadge source={overview?.data_source} />
+          </div>
+        </div>
+        <button onClick={fetchOverview} className="btn-outline text-xs py-1.5 px-3">
+          刷新
+        </button>
       </div>
 
-      {/* Quick Actions */}
-      <h2 style={{ fontSize: '1.25rem', marginBottom: '1rem' }}>🚀 快速操作</h2>
-      <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
-        <Button label="📈 市场概览" onClick={() => window.open('/api/v1/market/overview', '_blank')} />
-        <Button label="💹 茅台行情" onClick={() => window.open('/api/v1/market/quote/600519.SH', '_blank')} />
-        <Button label="🤖 AI 分析茅台" onClick={async () => {
-          const r = await fetch('/api/v1/analysis/stock', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({symbol: '600519.SH'})
-          });
-          const data = await r.json();
-          alert(JSON.stringify(data, null, 2).slice(0, 2000));
-        }} />
-        <Button label="📊 回测 MACD" onClick={async () => {
-          const r = await fetch('/api/v1/backtest/run', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({strategy: 'MACD', symbols: ['600519.SH']})
-          });
-          const data = await r.json();
-          alert(JSON.stringify(data.data?.total_return, null, 2));
-        }} />
-        <Button label="💰 账户" onClick={() => window.open('/api/v1/trading/account', '_blank')} />
-        <Button label="📋 持仓" onClick={() => window.open('/api/v1/trading/positions', '_blank')} />
+      <DataStateBanner meta={meta} />
+
+      {/* Market Indices */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+        {indices.length > 0 ? indices.map(([name, idx]) => (
+          <div key={name} className={`card p-3 ${changeBg(idx.change_pct)}`}>
+            <div className="text-xs text-neutral-500 mb-1">{name}</div>
+            <div className="text-lg font-bold font-mono tabular-nums">
+              {formatPrice(idx.price)}
+            </div>
+            <div className={`text-sm font-mono font-medium ${changeColor(idx.change_pct)}`}>
+              {formatPct(idx.change_pct)}
+            </div>
+          </div>
+        )) : (
+          Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="card p-3"><Skeleton className="h-16" /></div>
+          ))
+        )}
       </div>
 
-      {/* Risk Params */}
-      {status?.risk_params && (
-        <>
-          <h2 style={{ fontSize: '1.25rem', marginTop: '2rem', marginBottom: '1rem' }}>🛡️ 风控参数</h2>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <tbody>
-              {Object.entries(status.risk_params).map(([k, v]) => (
-                <tr key={k} style={{ borderBottom: '1px solid #eee' }}>
-                  <td style={{ padding: '0.5rem', fontWeight: 'bold' }}>{k}</td>
-                  <td style={{ padding: '0.5rem' }}>{String(v)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </>
+      {/* Market Breadth */}
+      {overview && (
+        <div className="card">
+          <div className="card-header">市场概览</div>
+          <div className="card-body">
+            <div className="grid grid-cols-3 lg:grid-cols-6 gap-3">
+              <StatItem label="上涨" value={String(overview.up_count)} color="text-up" />
+              <StatItem label="下跌" value={String(overview.down_count)} color="text-down" />
+              <StatItem label="涨停" value={String(overview.limit_up_count)} color="text-up" />
+              <StatItem label="跌停" value={String(overview.limit_down_count)} color="text-down" />
+              <StatItem label="成交额" value={formatAmount(overview.total_amount)} />
+              <StatItem label="北向资金" value={formatAmount(overview.northbound_flow)} color={changeColor(overview.northbound_flow)} />
+            </div>
+          </div>
+        </div>
       )}
 
-      <footer style={{ marginTop: '3rem', color: '#999', fontSize: '0.875rem' }}>
-        A股智能投研平台 v0.1.0 | Phase 1 - 项目骨架 | {new Date().getFullYear()}
-      </footer>
-    </main>
-  );
-}
+      {/* Hot Sectors (from stock list) */}
+      <HotSectors />
 
-function Card({ title, value, color }: { title: string; value: string; color: string }) {
-  return (
-    <div style={{ border: '1px solid #e5e7eb', borderRadius: '8px', padding: '1rem', borderTop: `3px solid ${color}` }}>
-      <div style={{ fontSize: '0.875rem', color: '#666', marginBottom: '0.25rem' }}>{title}</div>
-      <div style={{ fontSize: '1.25rem', fontWeight: 'bold', color }}>{value}</div>
+      {/* AI Picks */}
+      <div className="card">
+        <div className="card-header flex items-center justify-between">
+          <span>AI精选 · 趋势最强</span>
+          <Link href="/analysis" className="text-xs text-blue-600 hover:underline">
+            查看更多 →
+          </Link>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="text-xs text-neutral-500 border-b border-neutral-100">
+                <th className="text-left table-cell font-medium">股票</th>
+                <th className="text-right table-cell font-medium">最新价</th>
+                <th className="text-right table-cell font-medium">涨跌幅</th>
+                <th className="text-right table-cell font-medium">AI评分</th>
+                <th className="text-center table-cell font-medium">信号</th>
+              </tr>
+            </thead>
+            <tbody>
+              {aiPicks.length > 0 ? aiPicks.map((pick, i) => {
+                const quote = hotQuotes.find(q => q.symbol === pick.symbol)
+                return (
+                  <tr key={pick.symbol} className="border-b border-neutral-50 hover:bg-neutral-50 transition-colors">
+                    <td className="table-cell">
+                      <Link href={`/stock/${pick.symbol}`} className="hover:text-blue-600">
+                        <div className="font-medium text-sm">{pick.name || pick.symbol}</div>
+                        <div className="text-xs text-neutral-400">{pick.symbol}</div>
+                      </Link>
+                    </td>
+                    <td className="table-cell text-right font-mono tabular-nums">
+                      {quote ? formatPrice(quote.price) : <Skeleton className="h-4 w-14 ml-auto" />}
+                    </td>
+                    <td className={`table-cell text-right font-mono tabular-nums ${changeColor(quote?.change_pct)}`}>
+                      {quote ? formatPct(quote.change_pct) : '—'}
+                    </td>
+                    <td className="table-cell text-right">
+                      <span className={`font-bold font-mono ${scoreColor(pick.score)}`}>
+                        {pick.score.toFixed(0)}
+                      </span>
+                    </td>
+                    <td className="table-cell text-center">
+                      <Link
+                        href={`/analysis/${pick.symbol}`}
+                        className="text-xs text-blue-600 hover:underline"
+                      >
+                        AI分析
+                      </Link>
+                    </td>
+                  </tr>
+                )
+              }) : (
+                <tr>
+                  <td colSpan={5} className="table-cell text-center text-neutral-400">
+                    {aiMeta.state === 'LOADING' ? '加载中...' : aiMeta.state === 'ERROR' ? 'AI分析暂不可用' : '无数据'}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Strategy Performance placeholder */}
+      <div className="card">
+        <div className="card-header">策略表现</div>
+        <div className="card-body text-center py-8 text-neutral-400 text-sm">
+          <Link href="/strategy" className="text-blue-600 hover:underline">
+            前往策略中心查看 →
+          </Link>
+        </div>
+      </div>
     </div>
-  );
+  )
 }
 
-function Button({ label, onClick }: { label: string; onClick: () => void }) {
+function StatItem({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
-    <button
-      onClick={onClick}
-      style={{
-        padding: '0.75rem 1.25rem',
-        border: '1px solid #d1d5db',
-        borderRadius: '8px',
-        background: 'white',
-        cursor: 'pointer',
-        fontSize: '0.875rem',
-        transition: 'all 0.2s',
-      }}
-      onMouseEnter={(e) => (e.currentTarget.style.background = '#f3f4f6')}
-      onMouseLeave={(e) => (e.currentTarget.style.background = 'white')}
-    >
-      {label}
-    </button>
-  );
+    <div className="text-center">
+      <div className="text-xs text-neutral-500 mb-0.5">{label}</div>
+      <div className={`text-sm font-bold font-mono tabular-nums ${color || 'text-neutral-800'}`}>
+        {value}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Hot sectors - derived from stock list grouped by industry.
+ */
+function HotSectors() {
+  const [sectors, setSectors] = useState<{ name: string; count: number; symbols: string[] }[]>([])
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const stocks = await marketApi.getStockList()
+        const grouped: Record<string, string[]> = {}
+        for (const s of stocks) {
+          if (!grouped[s.industry]) grouped[s.industry] = []
+          grouped[s.industry].push(s.symbol)
+        }
+        const result = Object.entries(grouped)
+          .map(([name, symbols]) => ({ name, count: symbols.length, symbols }))
+          .sort((a, b) => b.count - a.count)
+        setSectors(result)
+      } catch { /* ignore */ }
+    })()
+  }, [])
+
+  if (sectors.length === 0) return null
+
+  return (
+    <div className="card">
+      <div className="card-header">热门板块</div>
+      <div className="card-body">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+          {sectors.map(sector => (
+            <Link
+              key={sector.name}
+              href={`/stock/${sector.symbols[0]}`}
+              className="flex items-center justify-between p-2.5 rounded-md bg-neutral-50 hover:bg-neutral-100 transition-colors"
+            >
+              <span className="text-sm font-medium">{sector.name}</span>
+              <span className="text-xs text-neutral-400">{sector.count}只</span>
+            </Link>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
 }

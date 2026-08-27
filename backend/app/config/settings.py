@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     # ── Database ─────────────────────────────────────────────
-    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/astock_ai"
+    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5433/astock_ai"
 
     # ── Redis ────────────────────────────────────────────────
     redis_url: str = "redis://localhost:6379/0"

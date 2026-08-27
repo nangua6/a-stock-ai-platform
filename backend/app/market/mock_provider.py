@@ -73,12 +73,26 @@ class MockMarketDataProvider(MarketDataProvider):
         end_date: Optional[str] = None,
         limit: int = 100,
     ) -> List[KlineData]:
+        from datetime import timedelta
         info = MOCK_STOCKS.get(symbol, {"base_price": 50.0})
         base = info["base_price"]
+        # Determine end date
+        if end_date:
+            try:
+                end_dt = datetime.strptime(end_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            except ValueError:
+                end_dt = datetime.now(timezone.utc)
+        else:
+            end_dt = datetime.now(timezone.utc)
         bars = []
         price = base
+        # Add trending behavior: random walk with momentum
+        trend = 0.0
         for i in range(limit, 0, -1):
-            change = random.uniform(-0.04, 0.04)
+            trade_dt = end_dt - timedelta(days=i)
+            # Autocorrelated returns (momentum)
+            trend = trend * 0.95 + random.gauss(0, 0.015)
+            change = max(-0.05, min(0.05, trend + random.gauss(0, 0.01)))
             o = round(price, 2)
             c = round(price * (1 + change), 2)
             h = round(max(o, c) * (1 + random.uniform(0, 0.02)), 2)
@@ -86,7 +100,7 @@ class MockMarketDataProvider(MarketDataProvider):
             v = random.randint(100_000, 10_000_000)
             bars.append(KlineData(
                 symbol=symbol,
-                trade_date=f"2026-{8 - (i // 30):02d}-{(30 - i % 30):02d}",
+                trade_date=trade_dt.strftime("%Y-%m-%d"),
                 timeframe=timeframe,
                 open=o, high=h, low=l, close=c,
                 volume=v,
