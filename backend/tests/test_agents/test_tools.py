@@ -29,14 +29,14 @@ class TestToolRegistry:
         for tool in ALL_BUILTIN_TOOLS:
             registry.register(tool)
         tools = registry.list_tools()
-        assert len(tools) == 8
+        assert len(tools) == 9
 
     def test_list_by_permission(self):
         registry = ToolRegistry()
         for tool in ALL_BUILTIN_TOOLS:
             registry.register(tool)
         read_tools = registry.list_tools(permission=ToolPermission.READ_ONLY)
-        assert len(read_tools) == 8  # All are READ_ONLY
+        assert len(read_tools) == 9  # All are READ_ONLY
 
     def test_to_openai_functions(self):
         registry = ToolRegistry()

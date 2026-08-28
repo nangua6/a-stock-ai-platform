@@ -533,6 +533,83 @@ ANNOUNCEMENT_TOOL = Tool(
 # Registration
 # ══════════════════════════════════════════════════════════════════════════════
 
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Tool 9: RAGSearchTool
+# ══════════════════════════════════════════════════════════════════════════════
+
+async def _rag_search_handler(
+    query: str,
+    symbol: str = "",
+    document_type: str = "",
+    top_k: int = 5,
+) -> dict:
+    """RAGSearchTool handler. Searches knowledge base for relevant documents."""
+    if not query:
+        return {"error": "INVALID_ARGUMENT", "message": "query is required"}
+    try:
+        from app.rag.retriever import Retriever
+        from app.rag.embedding import get_embedding_provider
+        from app.rag.vector_store import get_vector_store
+
+        retriever = Retriever(
+            embedding_provider=get_embedding_provider(),
+            vector_store=get_vector_store(),
+        )
+
+        results = await retriever.retrieve(
+            query=query,
+            top_k=top_k,
+            symbol=symbol or None,
+            document_type=document_type or None,
+        )
+
+        if not results:
+            return {
+                "status": "UNAVAILABLE",
+                "message": "No relevant documents found",
+                "query": query,
+                "results": [],
+            }
+
+        return {
+            "status": "OK",
+            "query": query,
+            "total": len(results),
+            "results": [
+                {
+                    "chunk_id": r.chunk_id,
+                    "document_id": r.document_id,
+                    "content": r.content,
+                    "score": round(r.score, 4),
+                    "metadata": r.metadata,
+                }
+                for r in results
+            ],
+        }
+    except Exception as e:
+        logger.error("RAGSearchTool error", error=str(e))
+        return {"status": "ERROR", "message": str(e)}
+
+
+RAG_SEARCH_TOOL = Tool(
+    name="rag_search",
+    description="知识库检索工具。检索公告、新闻、财务等历史文档，用于补充实时数据之外的背景信息。",
+    parameters={
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "检索查询"},
+            "symbol": {"type": "string", "description": "股票代码，如 600519.SH"},
+            "document_type": {"type": "string", "description": "文档类型: NEWS/ANNOUNCEMENT/FINANCIAL"},
+            "top_k": {"type": "integer", "default": 5, "description": "返回结果数量"},
+        },
+        "required": ["query"],
+    },
+    permission=ToolPermission.READ_ONLY,
+    handler=_rag_search_handler,
+)
+
 ALL_BUILTIN_TOOLS = [
     MARKET_DATA_TOOL,
     TECHNICAL_ANALYSIS_TOOL,
@@ -542,6 +619,7 @@ ALL_BUILTIN_TOOLS = [
     FINANCIAL_DATA_TOOL,
     NEWS_SEARCH_TOOL,
     ANNOUNCEMENT_TOOL,
+    RAG_SEARCH_TOOL,
 ]
 
 

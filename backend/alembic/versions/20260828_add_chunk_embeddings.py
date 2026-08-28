@@ -1,4 +1,4 @@
-"""add chunk embeddings with pgvector
+"""add chunk embeddings
 
 Revision ID: chunk_emb_001
 Revises: doc_chunks_001
@@ -14,7 +14,7 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Enable pgvector extension
+    # Enable pgvector extension (optional, for future upgrade)
     op.execute('CREATE EXTENSION IF NOT EXISTS vector')
 
     op.create_table(

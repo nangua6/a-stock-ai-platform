@@ -46,6 +46,7 @@ SYSTEM_PROMPT = """你是A股智能投研平台的AI分析师。你的任务是�
 - screen_stocks: 筛选符合条件的股票
 - get_stock_risk: 18项风控检查
 - get_portfolio: 查看组合状态
+- rag_search: 知识库检索（公告、新闻、财务历史文档）
 
 ## 核心规则（必须严格遵守）
 
@@ -523,7 +524,23 @@ class InvestmentResearchAgent:
                     summary=item.get('title', ''),
                 ))
 
-        return evidence
+
+        # RAG evidence (from knowledge base retrieval)
+        rag = tool_results.get('rag_search', {})
+        if isinstance(rag, dict) and rag.get('status') == 'OK':
+            rag_results = rag.get('results', [])
+            for item in rag_results[:3]:  # top 3 as evidence
+                meta = item.get('metadata', {})
+                evidence.append(EvidenceItem(
+                    type='KNOWLEDGE',
+                    source=meta.get('source', 'knowledge_base'),
+                    citation_id=item.get('chunk_id', ''),
+                    document_id=item.get('document_id', ''),
+                    timestamp=meta.get('published_at', '') or datetime.now(timezone.utc).isoformat(),
+                    summary=item.get('content', '')[:200] if item.get('content') else f"Knowledge: {item.get('chunk_id', '')}",
+                ))
+
+                return evidence
 
     def _build_fallback_response(
         self,

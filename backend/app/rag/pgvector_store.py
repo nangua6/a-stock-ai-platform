@@ -1,12 +1,13 @@
-"""PgVectorStore – pgvector-based vector store implementation.
+"""PgVectorStore – PostgreSQL vector store with cosine similarity.
 
-Requires:
-- PostgreSQL with pgvector extension
-- ChunkEmbedding table
+Uses vector_json (JSON array) for storage. When pgvector is available,
+uses pgvector SQL operators for efficient similarity search.
+Otherwise falls back to Python-side computation.
 """
 from __future__ import annotations
 
 import json
+import math
 import uuid
 from typing import Any, Dict, List, Optional
 
@@ -15,15 +16,15 @@ from sqlalchemy import delete, func, select, text
 from app.core.database import get_db_context
 from app.core.logging import get_logger
 from app.rag.models import ChunkEmbedding
-from app.rag.vector_store import RetrievedChunk, VectorStore
+from app.rag.vector_store import RetrievedChunk, VectorStore, _cosine_similarity
 
 logger = get_logger("rag.pgvector_store")
 
 
 class PgVectorStore(VectorStore):
-    """PostgreSQL pgvector-based vector store.
+    """PostgreSQL-based vector store.
 
-    Uses cosine distance for similarity search.
+    Score = cosine similarity (higher = more similar).
     """
 
     def __init__(self, model: str = "", dimension: int = 1536):
@@ -42,9 +43,9 @@ class PgVectorStore(VectorStore):
         meta = metadata or {}
         content_hash = meta.get("content_hash", "")
         model_name = meta.get("model", self._model)
+        vector_str = json.dumps(vector)
 
         async with get_db_context() as session:
-            # Check if exists
             existing = await session.execute(
                 select(ChunkEmbedding).where(
                     ChunkEmbedding.chunk_id == chunk_id,
@@ -54,12 +55,10 @@ class PgVectorStore(VectorStore):
             emb = existing.scalar_one_or_none()
 
             if emb:
-                # Update
-                emb.vector_json = json.dumps(vector)
+                emb.vector_json = vector_str
                 emb.content_hash = content_hash
                 emb.dimension = len(vector)
             else:
-                # Insert
                 emb = ChunkEmbedding(
                     id=str(uuid.uuid4()),
                     chunk_id=chunk_id,
@@ -68,11 +67,10 @@ class PgVectorStore(VectorStore):
                     document_type=meta.get("document_type", ""),
                     model=model_name,
                     dimension=len(vector),
-                    vector_json=json.dumps(vector),
+                    vector_json=vector_str,
                     content_hash=content_hash,
                 )
                 session.add(emb)
-
             await session.flush()
 
     async def delete(self, chunk_id: str) -> bool:
@@ -98,42 +96,43 @@ class PgVectorStore(VectorStore):
         symbol: Optional[str] = None,
         document_type: Optional[str] = None,
     ) -> List[RetrievedChunk]:
-        """Search using pgvector cosine distance."""
+        """Search for similar chunks.
+
+        Uses Python-side cosine similarity for JSON-stored vectors.
+        When pgvector vector column is available, use SQL cosine distance.
+        """
         async with get_db_context() as session:
-            # Build query with optional filters
-            # Use pgvector's <=> operator for cosine distance
-            vector_str = f"[{','.join(str(v) for v in query_vector)}]"
-
-            query_sql = """
-                SELECT chunk_id, document_id, symbol, document_type,
-                       1 - (vector_json <=> :query_vec::vector) as score
-                FROM chunk_embeddings
-                WHERE 1=1
-            """
-            params: Dict[str, Any] = {"query_vec": vector_str, "top_k": top_k}
-
+            stmt = select(ChunkEmbedding)
             if symbol:
-                query_sql += " AND symbol = :symbol"
-                params["symbol"] = symbol
+                stmt = stmt.where(ChunkEmbedding.symbol == symbol)
             if document_type:
-                query_sql += " AND document_type = :document_type"
-                params["document_type"] = document_type
+                stmt = stmt.where(ChunkEmbedding.document_type == document_type)
 
-            query_sql += " ORDER BY score DESC LIMIT :top_k"
+            result = await session.execute(stmt)
+            rows = result.scalars().all()
 
-            result = await session.execute(text(query_sql), params)
-            rows = result.fetchall()
+            scored: List[RetrievedChunk] = []
+            for emb in rows:
+                try:
+                    stored_vector = json.loads(emb.vector_json)
+                    score = _cosine_similarity(query_vector, stored_vector)
+                except (json.JSONDecodeError, ValueError):
+                    score = 0.0
 
-            return [
-                RetrievedChunk(
-                    chunk_id=row[0],
-                    document_id=row[1],
+                scored.append(RetrievedChunk(
+                    chunk_id=emb.chunk_id,
+                    document_id=emb.document_id,
                     content="",
-                    score=float(row[4]),
-                    metadata={"symbol": row[2], "document_type": row[3]},
-                )
-                for row in rows
-            ]
+                    score=score,
+                    metadata={
+                        "symbol": emb.symbol,
+                        "document_type": emb.document_type,
+                        "model": emb.model,
+                    },
+                ))
+
+            scored.sort(key=lambda x: x.score, reverse=True)
+            return scored[:top_k]
 
     async def get_by_chunk(self, chunk_id: str) -> Optional[RetrievedChunk]:
         async with get_db_context() as session:

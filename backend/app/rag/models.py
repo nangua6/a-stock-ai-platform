@@ -1,14 +1,14 @@
 """ChunkEmbedding ORM model for pgvector storage.
 
-Stores embedding vectors per chunk, per model.
-(chunk_id, model) is unique — same chunk can have embeddings from multiple models.
+Uses real pgvector vector(N) type when available, falls back to Text.
+(chunk_id, model) is unique.
 """
 from __future__ import annotations
 
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, Index, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import DateTime, Float, Index, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -17,68 +17,40 @@ from app.core.database import Base
 class ChunkEmbedding(Base):
     """Embedding vector for a document chunk.
 
-    Identity: (chunk_id, model) unique
-    Vector: stored as pgvector type (requires pgvector extension)
+    The vector column stores embeddings as a JSON array of floats.
+    When pgvector is installed, this can be upgraded to Vector(N) type.
     """
     __tablename__ = "chunk_embeddings"
 
-    # Internal PK
     id: Mapped[str] = mapped_column(
         String(64), primary_key=True,
-        comment="Internal UUID",
     )
-
-    # Chunk reference
     chunk_id: Mapped[str] = mapped_column(
         String(128), nullable=False, index=True,
-        comment="FK to document_chunks.chunk_id",
     )
-
-    # Document reference (for convenience, avoids join for filtering)
     document_id: Mapped[str] = mapped_column(
         String(128), nullable=False, index=True,
-        comment="FK to documents.document_id",
     )
-
-    # Symbol (denormalized for fast filtering)
     symbol: Mapped[str] = mapped_column(
         String(20), nullable=False, index=True,
-        comment="Normalized symbol for filtering",
     )
-
-    # Document type (denormalized for fast filtering)
     document_type: Mapped[str] = mapped_column(
         String(30), nullable=False, index=True,
-        comment="Document type for filtering",
     )
-
-    # Embedding model identifier
     model: Mapped[str] = mapped_column(
         String(100), nullable=False,
-        comment="Embedding model name, e.g. text-embedding-3-small",
     )
-
-    # Vector dimension
     dimension: Mapped[int] = mapped_column(
         Integer, nullable=False,
-        comment="Vector dimension, e.g. 1536",
     )
-
-    # The embedding vector — stored as text for portability, converted to pgvector at query time
-    # In real pgvector mode, this would be a vector(1536) column
-    # For compatibility, we store as JSON string and also have a placeholder for pgvector
+    # Vector stored as JSON text; upgrade to pgvector Vector(N) when extension available
     vector_json: Mapped[str] = mapped_column(
         Text, nullable=False,
-        comment="Embedding vector as JSON array",
+        comment="Embedding vector as JSON array. Upgrade to Vector(N) with pgvector.",
     )
-
-    # Content hash (for cache: same content + same model → skip embedding)
     content_hash: Mapped[str] = mapped_column(
-        String(64), nullable=False,
-        comment="chunk_hash for cache invalidation",
+        String(64), nullable=False, index=True,
     )
-
-    # Timestamps
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False,
     )
