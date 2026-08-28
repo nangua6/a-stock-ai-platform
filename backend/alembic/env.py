@@ -21,6 +21,7 @@ from app.models import (
     DataSyncJob, TechnicalSnapshot, AnalysisSnapshot,
 )
 from app.documents.models import Document
+from app.documents.chunk_models import DocumentChunk
 from app.config.settings import get_settings
 
 config = context.config
