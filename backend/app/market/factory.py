@@ -5,7 +5,7 @@ Creates the correct provider chain based on MARKET_DATA_MODE setting.
 
 Modes:
 - mock: MockMarketDataProvider (for unit tests)
-- real: AkShareMarketDataProvider with MockMarketDataProvider fallback
+- real: AkShareProvider with MockMarketDataProvider fallback
 
 Fallback behavior:
 - In real mode, if AkShare fails → fallback to Mock with explicit fallback_reason
@@ -23,6 +23,12 @@ from app.market.mock_provider import MockMarketDataProvider
 from app.market.provider_manager import ProviderManager
 
 logger = get_logger("market.factory")
+
+
+def _get_market_data_mode() -> str:
+    """Get the current market data mode string ('mock' or 'real')."""
+    settings = get_settings()
+    return settings.market_data_mode.value
 
 
 def create_provider(mode: Optional[str] = None, cache: Optional[MarketDataCache] = None):
@@ -44,8 +50,8 @@ def create_provider(mode: Optional[str] = None, cache: Optional[MarketDataCache]
 
     # Real mode: try AkShare first, fallback to Mock
     try:
-        from app.market.akshare_provider import AkShareMarketDataProvider
-        akshare = AkShareMarketDataProvider()
+        from app.market.akshare_provider import AkShareProvider
+        akshare = AkShareProvider()
         logger.info("Creating REAL market data provider (AkShare + Mock fallback)")
         return ProviderManager(
             providers=[akshare, MockMarketDataProvider()],

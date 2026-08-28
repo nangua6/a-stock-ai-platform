@@ -87,19 +87,72 @@ class KlineData:
 @dataclass
 class FinancialData:
     symbol: str = ""
-    report_date: str = ""
-    revenue: float = 0.0
-    net_profit: float = 0.0
-    eps: float = 0.0
-    roe: float = 0.0
-    pe_ratio: float = 0.0
-    pb_ratio: float = 0.0
-    market_cap: float = 0.0
-    total_share: float = 0.0
+    report_period: str = ""          # e.g. "2025-12-31" or "2025Q4"
+    published_at: Optional[str] = None   # disclosure date (when the report was published)
+    retrieved_at: str = ""           # when this data was fetched
     data_source: str = ""
+    data_quality: str = "UNKNOWN"    # GOOD | PARTIAL | UNAVAILABLE
+
+    # Income statement
+    revenue: Optional[float] = None            # total revenue (yuan)
+    revenue_yoy: Optional[float] = None        # revenue YoY growth %
+    net_profit: Optional[float] = None         # net profit (yuan)
+    net_profit_yoy: Optional[float] = None     # net profit YoY growth %
+    gross_margin: Optional[float] = None       # gross profit margin %
+    net_margin: Optional[float] = None         # net profit margin %
+
+    # Balance sheet / returns
+    roe: Optional[float] = None                # return on equity %
+    roa: Optional[float] = None                # return on assets %
+    eps: Optional[float] = None                # earnings per share (yuan)
+
+    # Cash flow
+    operating_cash_flow: Optional[float] = None  # operating cash flow per share (yuan)
+
+    # Valuation
+    pe_ratio: Optional[float] = None           # P/E ratio (dynamic)
+    pb_ratio: Optional[float] = None           # P/B ratio
+    market_cap: Optional[float] = None         # total market cap (yuan)
+    total_share: Optional[float] = None        # total shares outstanding
 
 
 # ── New enhanced types ─────────────────────────────────────────────────────────
+
+@dataclass
+class NewsItem:
+    """A single news article with full provenance."""
+    id: str = ""                        # unique news id
+    title: str = ""
+    summary: str = ""                   # original or generated summary
+    content: str = ""                   # full content if available
+    published_at: Optional[str] = None  # when the article was published (from source)
+    retrieved_at: str = ""              # when we fetched it
+    source: str = ""                    # e.g. "证券时报网", "界面新闻"
+    url: str = ""
+    symbols: List[str] = field(default_factory=list)  # normalized: ["600519.SH"]
+    citation_id: str = ""              # e.g. "news_600519_20260827_001"
+    data_quality: str = "UNKNOWN"      # GOOD | PARTIAL | UNAVAILABLE
+    content_hash: str = ""             # for dedup
+
+
+@dataclass
+class AnnouncementItem:
+    """A single company announcement with full provenance."""
+    id: str = ""                            # unique announcement id
+    symbol: str = ""                        # normalized: "600519.SH"
+    name: str = ""                          # stock name: "贵州茅台"
+    title: str = ""                         # announcement title
+    summary: str = ""                       # brief summary
+    content: str = ""                       # full content if available
+    announcement_type: str = "OTHER"        # ANNUAL_REPORT / QUARTERLY_REPORT / ...
+    published_at: Optional[str] = None      # when the announcement was published (from source)
+    retrieved_at: str = ""                  # when we fetched it
+    source: str = ""                        # e.g. "东方财富"
+    url: str = ""                           # announcement URL
+    citation_id: str = ""                   # e.g. "announcement_600519_SH_20260815_001"
+    data_quality: str = "UNKNOWN"           # GOOD | PARTIAL | UNAVAILABLE
+    content_hash: str = ""                  # for dedup
+
 
 @dataclass
 class StockBasicInfo:

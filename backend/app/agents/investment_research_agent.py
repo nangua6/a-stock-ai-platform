@@ -176,7 +176,7 @@ class InvestmentResearchAgent:
             ]
 
             tools = self.registry.to_openai_functions()
-            llm_tools = [LLMTool(function=t) for t in tools] if tools else None
+            llm_tools = [LLMTool(function=t["function"]) for t in tools] if tools else None
 
             llm_response = await self.llm.chat(
                 messages=messages,
@@ -303,6 +303,7 @@ class InvestmentResearchAgent:
             messages.append(LLMMessage(
                 role="assistant",
                 content=llm_response.content,
+                tool_calls=llm_response.tool_calls,
             ))
 
             # Execute each tool call and add results
@@ -497,24 +498,30 @@ class InvestmentResearchAgent:
         # News evidence
         news = tool_results.get('search_news', {})
         if isinstance(news, dict) and news.get('status') == 'OK':
-            evidence.append(EvidenceItem(
-                type='NEWS',
-                source='news_search',
-                citation_id=f"news_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}",
-                timestamp=datetime.now(timezone.utc).isoformat(),
-                summary=f"新闻: {news.get('total', 0)} 条",
-            ))
+            items = news.get('items', [])
+            provider = news.get('provider', 'unknown')
+            for item in items[:3]:  # top 3 as evidence
+                evidence.append(EvidenceItem(
+                    type='NEWS',
+                    source=item.get('source', provider),
+                    citation_id=item.get('citation_id', ''),
+                    timestamp=item.get('published_at', '') or datetime.now(timezone.utc).isoformat(),
+                    summary=item.get('title', '') or item.get('summary', ''),
+                ))
 
-        # Announcement evidence
+        # Announcement evidence (per-item, up to 3)
         ann = tool_results.get('get_announcements', {})
         if isinstance(ann, dict) and ann.get('status') == 'OK':
-            evidence.append(EvidenceItem(
-                type='ANNOUNCEMENT',
-                source='announcement_search',
-                citation_id=f"announcement_{ann.get('symbol', 'unknown')}",
-                timestamp=datetime.now(timezone.utc).isoformat(),
-                summary=f"公告: {ann.get('total', 0)} 条",
-            ))
+            ann_items = ann.get('items', [])
+            provider = ann.get('provider', 'unknown')
+            for item in ann_items[:3]:  # top 3 as evidence
+                evidence.append(EvidenceItem(
+                    type='ANNOUNCEMENT',
+                    source=item.get('source', provider),
+                    citation_id=item.get('citation_id', ''),
+                    timestamp=item.get('published_at', '') or datetime.now(timezone.utc).isoformat(),
+                    summary=item.get('title', ''),
+                ))
 
         return evidence
 

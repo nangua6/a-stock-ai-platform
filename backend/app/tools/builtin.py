@@ -312,39 +312,22 @@ PORTFOLIO_TOOL = Tool(
 # ══════════════════════════════════════════════════════════════════════════════
 
 async def _financial_data_handler(symbol: str) -> dict:
-    """FinancialDataTool handler. Returns financial snapshot from available data."""
+    """FinancialDataTool handler. Returns real financial data from AkShare."""
     if not symbol:
         return {"error": "INVALID_ARGUMENT", "message": "symbol is required"}
     provider = _get_provider()
     try:
-        # Try to get financial data from provider
         if hasattr(provider, 'get_financial_data'):
             fin = await provider.get_financial_data(symbol)
-            if fin:
+            if fin and fin.data_quality != "UNAVAILABLE":
                 return {
                     "status": "OK",
                     "symbol": symbol,
                     "data": _to_serializable(fin),
-                    "source": getattr(fin, "data_source", "provider"),
+                    "source": fin.data_source,
+                    "report_period": fin.report_period,
+                    "data_quality": fin.data_quality,
                 }
-        # Try quote for basic info
-        quote = await provider.get_realtime_quote(symbol)
-        if quote:
-            return {
-                "status": "PARTIAL",
-                "symbol": symbol,
-                "data": {
-                    "symbol": symbol,
-                    "name": getattr(quote, "name", ""),
-                    "price": getattr(quote, "price", 0),
-                    "report_period": "unknown",
-                    "published_at": "",
-                    "source": getattr(quote, "data_source", "unknown"),
-                    "data_quality": "PARTIAL",
-                    "note": "Full financial data not available from current provider",
-                },
-                "source": getattr(quote, "data_source", "unknown"),
-            }
         return {"status": "UNAVAILABLE", "symbol": symbol, "message": "Financial data not available"}
     except Exception as e:
         logger.error("FinancialDataTool error", symbol=symbol, error=str(e))
@@ -369,14 +352,47 @@ async def _news_search_handler(
     symbols: str = "",
     limit: int = 5,
 ) -> dict:
-    """NewsSearchTool handler. Returns news articles."""
+    """NewsSearchTool handler. Returns real news from AkShare."""
     try:
-        # News search not yet implemented in provider
+        from app.news.provider import NewsProviderManager, AkShareNewsProvider, normalize_symbol
+
+        manager = NewsProviderManager(providers=[AkShareNewsProvider()])
+        symbol_list = [normalize_symbol(s.strip()) for s in symbols.split(",") if s.strip()] if symbols else []
+
+        items, provider_used, fallback_reason = await manager.search_news(
+            query=query, symbols=symbol_list, limit=limit,
+        )
+
+        if not items:
+            return {
+                "status": "UNAVAILABLE",
+                "message": "No news available",
+                "query": query,
+                "symbols": symbol_list,
+                "provider": provider_used,
+                "fallback_reason": fallback_reason,
+            }
+
         return {
-            "status": "UNAVAILABLE",
-            "message": "News search not yet available",
-            "query": query,
-            "symbols": symbols.split(",") if symbols else [],
+            "status": "OK",
+            "total": len(items),
+            "items": [
+                {
+                    "title": item.title,
+                    "summary": item.summary,
+                    "published_at": item.published_at,
+                    "source": item.source,
+                    "url": item.url,
+                    "symbols": item.symbols,
+                    "citation_id": item.citation_id,
+                    "data_quality": item.data_quality,
+                }
+                for item in items
+            ],
+            "provider": provider_used,
+            "retrieved_at": items[0].retrieved_at if items else "",
+            "data_quality": items[0].data_quality if items else "UNAVAILABLE",
+            "fallback_reason": fallback_reason,
         }
     except Exception as e:
         logger.error("NewsSearchTool error", error=str(e))
@@ -409,15 +425,87 @@ async def _announcement_handler(
     start_date: str = "",
     end_date: str = "",
 ) -> dict:
-    """AnnouncementTool handler. Returns company announcements."""
+    """AnnouncementTool handler. Returns company announcements from AkShare."""
     if not symbol:
         return {"error": "INVALID_ARGUMENT", "message": "symbol is required"}
     try:
-        # Announcement search not yet implemented in provider
+        from app.announcements.provider import (
+            AkShareAnnouncementProvider,
+            AnnouncementProviderManager,
+            normalize_symbol,
+        )
+
+        normalized = normalize_symbol(symbol)
+
+        # Check mode: if mock, use mock announcement provider
+        from app.market.factory import _get_market_data_mode
+        mode = _get_market_data_mode()
+
+        if mode == "mock":
+            # Return mock announcements
+            return {
+                "status": "OK",
+                "symbol": normalized,
+                "total": 3,
+                "items": [
+                    {
+                        "title": f"[MOCK] {normalized} 公告 #{i+1}",
+                        "announcement_type": "OTHER",
+                        "published_at": "2026-08-25",
+                        "source": "MOCK",
+                        "url": "",
+                        "symbol": normalized,
+                        "name": "",
+                        "citation_id": f"announcement_{normalized.replace('.', '_')}_20260825_{i:03d}",
+                        "data_quality": "MOCK",
+                    }
+                    for i in range(3)
+                ],
+                "provider": "mock",
+                "retrieved_at": datetime.now(timezone.utc).isoformat(),
+                "data_quality": "MOCK",
+                "fallback_reason": None,
+            }
+
+        manager = AnnouncementProviderManager(providers=[AkShareAnnouncementProvider()])
+        items, provider_used, fallback_reason = await manager.get_announcements(
+            symbol=normalized,
+            start_date=start_date or None,
+            end_date=end_date or None,
+            limit=20,
+        )
+
+        if not items:
+            return {
+                "status": "UNAVAILABLE",
+                "symbol": normalized,
+                "message": "No announcements available",
+                "provider": provider_used,
+                "fallback_reason": fallback_reason,
+            }
+
         return {
-            "status": "UNAVAILABLE",
-            "symbol": symbol,
-            "message": "Announcement search not yet available",
+            "status": "OK",
+            "symbol": normalized,
+            "total": len(items),
+            "items": [
+                {
+                    "title": item.title,
+                    "announcement_type": item.announcement_type,
+                    "published_at": item.published_at,
+                    "source": item.source,
+                    "url": item.url,
+                    "symbol": item.symbol,
+                    "name": item.name,
+                    "citation_id": item.citation_id,
+                    "data_quality": item.data_quality,
+                }
+                for item in items
+            ],
+            "provider": provider_used,
+            "retrieved_at": items[0].retrieved_at if items else "",
+            "data_quality": items[0].data_quality if items else "UNAVAILABLE",
+            "fallback_reason": fallback_reason,
         }
     except Exception as e:
         logger.error("AnnouncementTool error", error=str(e))

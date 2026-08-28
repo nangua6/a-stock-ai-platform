@@ -37,6 +37,7 @@ MAX_DELAY = 10.0
 REQUEST_TIMEOUT = 15.0
 
 
+
 def _to_akshare_symbol(symbol: str) -> str:
     """600519.SH -> 600519"""
     return symbol.split(".")[0]
@@ -212,24 +213,123 @@ class AkShareProvider(MarketDataProvider):
         return bars
 
     async def get_financial_data(self, symbol: str) -> FinancialData:
+        """Fetch real financial data from AkShare: income stmt + indicators + valuation."""
         import akshare as ak
         ak_symbol = _to_akshare_symbol(symbol)
+        now = datetime.now(timezone.utc).isoformat()
+        result = FinancialData(symbol=symbol, retrieved_at=now, data_source="akshare")
 
-        async def _fetch():
-            return await asyncio.to_thread(ak.stock_individual_info_em, ak_symbol)
+        # ── 1. Income statement (revenue, net_profit) ──────────────────────────
+        try:
+            async def _fetch_income():
+                return await asyncio.to_thread(ak.stock_financial_report_sina, stock=ak_symbol, symbol="利润表")
 
-        df = await _retry_call(_fetch, operation="get_financial_data", symbol=symbol)
-        if df is None or df.empty:
-            raise ValueError(f"AkShare empty financial data for {symbol}")
-        info = dict(zip(df["item"], df["value"]))
-        return FinancialData(
-            symbol=symbol, report_date=datetime.now().strftime("%Y-%m-%d"),
-            pe_ratio=float(info.get("市盈率(动态)", 0) or 0),
-            pb_ratio=float(info.get("市净率", 0) or 0),
-            market_cap=float(info.get("总市值", 0) or 0),
-            total_share=float(info.get("总股本", 0) or 0),
-            data_source="akshare",
-        )
+            df_income = await _retry_call(_fetch_income, operation="financial_income", symbol=symbol)
+            if df_income is not None and not df_income.empty:
+                latest = df_income.iloc[0]
+                report_date_raw = str(latest.get("报告日", ""))
+                if len(report_date_raw) == 8:
+                    result.report_period = f"{report_date_raw[:4]}-{report_date_raw[4:6]}-{report_date_raw[6:8]}"
+                else:
+                    result.report_period = report_date_raw
+
+                revenue_val = latest.get("营业总收入")
+                net_profit_val = latest.get("净利润")
+                if revenue_val is not None and str(revenue_val) not in ("", "nan", "None"):
+                    result.revenue = float(revenue_val)
+                if net_profit_val is not None and str(net_profit_val) not in ("", "nan", "None"):
+                    result.net_profit = float(net_profit_val)
+
+                # YoY growth from previous year same period
+                if len(df_income) >= 5:
+                    prev = df_income.iloc[4]  # same quarter previous year
+                    prev_rev = prev.get("营业总收入")
+                    prev_np = prev.get("净利润")
+                    if result.revenue and prev_rev and float(prev_rev) > 0:
+                        result.revenue_yoy = round((result.revenue - float(prev_rev)) / float(prev_rev) * 100, 2)
+                    if result.net_profit and prev_np and float(prev_np) > 0:
+                        result.net_profit_yoy = round((result.net_profit - float(prev_np)) / float(prev_np) * 100, 2)
+        except Exception as e:
+            logger.warning("akshare_income_failed", symbol=symbol, error=str(e)[:100])
+
+        # ── 2. Financial indicators (ROE, margins, cash flow) ──────────────────
+        try:
+            async def _fetch_indicators():
+                return await asyncio.to_thread(ak.stock_financial_analysis_indicator, symbol=ak_symbol, start_year="2024")
+
+            df_ind = await _retry_call(_fetch_indicators, operation="financial_indicators", symbol=symbol)
+            if df_ind is not None and not df_ind.empty:
+                latest_ind = df_ind.iloc[0]
+
+                def _safe_pct(val):
+                    if val is None or str(val) in ("", "nan", "None", "nan%"):
+                        return None
+                    try:
+                        return round(float(val), 2)
+                    except (ValueError, TypeError):
+                        return None
+
+                def _safe_float(val):
+                    if val is None or str(val) in ("", "nan", "None"):
+                        return None
+                    try:
+                        return round(float(val), 4)
+                    except (ValueError, TypeError):
+                        return None
+
+                result.roe = _safe_pct(latest_ind.get("净资产收益率(%)"))
+                result.roa = _safe_pct(latest_ind.get("总资产利润率(%)"))
+                result.net_margin = _safe_pct(latest_ind.get("销售净利率(%)"))
+                result.gross_margin = _safe_pct(latest_ind.get("销售毛利率(%)"))
+                result.eps = _safe_float(latest_ind.get("摊薄每股收益(元)"))
+                result.operating_cash_flow = _safe_float(latest_ind.get("每股经营性现金流(元)"))
+
+                # Use indicator report_period if income stmt failed
+                if not result.report_period:
+                    ind_date = str(latest_ind.get("日期", ""))
+                    if ind_date:
+                        result.report_period = ind_date[:10]
+        except Exception as e:
+            logger.warning("akshare_indicators_failed", symbol=symbol, error=str(e)[:100])
+
+        # ── 3. Valuation (PE, PB, market_cap) ─────────────────────────────────
+        try:
+            async def _fetch_info():
+                return await asyncio.to_thread(ak.stock_individual_info_em, ak_symbol)
+
+            df_info = await _retry_call(_fetch_info, operation="financial_valuation", symbol=symbol)
+            if df_info is not None and not df_info.empty:
+                info = dict(zip(df_info["item"], df_info["value"]))
+
+                def _safe_val(key):
+                    v = info.get(key)
+                    if v is None or str(v) in ("", "nan", "None", "--"):
+                        return None
+                    try:
+                        return float(v)
+                    except (ValueError, TypeError):
+                        return None
+
+                result.pe_ratio = _safe_val("市盈率(动态)")
+                result.pb_ratio = _safe_val("市净率")
+                result.market_cap = _safe_val("总市值")
+                result.total_share = _safe_val("总股本")
+        except Exception as e:
+            logger.warning("akshare_valuation_failed", symbol=symbol, error=str(e)[:100])
+
+        # ── 4. Data quality assessment ─────────────────────────────────────────
+        fields = [result.revenue, result.net_profit, result.roe, result.pe_ratio, result.pb_ratio]
+        non_null = sum(1 for f in fields if f is not None)
+        if non_null >= 4:
+            result.data_quality = "GOOD"
+        elif non_null >= 2:
+            result.data_quality = "PARTIAL"
+        elif non_null >= 1:
+            result.data_quality = "PARTIAL"
+        else:
+            result.data_quality = "UNAVAILABLE"
+
+        return result
 
     async def get_stock_list(self, market: Optional[str] = None) -> List[dict]:
         import akshare as ak
@@ -320,10 +420,22 @@ class AkShareProvider(MarketDataProvider):
         ak_symbol = _to_akshare_symbol(symbol)
 
         async def _fetch():
-            return await asyncio.to_thread(ak.stock_report_fund_hold_detail, ak_symbol)
+            return await asyncio.to_thread(
+                ak.stock_individual_notice_report,
+                security=ak_symbol,
+                symbol="全部",
+            )
 
         df = await _retry_call(_fetch, operation="get_announcements", symbol=symbol)
         if df is None or df.empty:
             return []
-        return [{"title": str(row.get("公告", "")), "time": str(row.get("日期", ""))}
-                for _, row in df.head(limit).iterrows()]
+        return [
+            {
+                "title": str(row.get("公告标题", "")),
+                "type": str(row.get("公告类型", "")),
+                "date": str(row.get("公告日期", "")),
+                "url": str(row.get("网址", "")),
+                "name": str(row.get("名称", "")),
+            }
+            for _, row in df.head(limit).iterrows()
+        ]
