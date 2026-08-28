@@ -37,6 +37,11 @@ class MarketDataProviderName(str, Enum):
     EASTMONEY = "eastmoney"
 
 
+class RAGMode(str, Enum):
+    MOCK = "mock"
+    REAL = "real"
+
+
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
@@ -71,6 +76,14 @@ class Settings(BaseSettings):
     market_data_provider: MarketDataProviderName = MarketDataProviderName.TUSHARE
     market_data_api_key: str = ""
     market_data_fallback_enabled: bool = True
+
+    # ── Embedding / RAG ──────────────────────────────────────
+    rag_mode: RAGMode = RAGMode.MOCK
+    embedding_provider: str = "openai"          # openai | mock
+    embedding_model: str = "text-embedding-3-small"
+    embedding_dimension: int = 1536
+    embedding_base_url: str = ""                # defaults to mimo_base_url if empty
+    embedding_api_key: str = ""                 # defaults to mimo_api_key if empty
 
     # ── Broker ───────────────────────────────────────────────
     broker_provider: BrokerProvider = BrokerProvider.MOCK

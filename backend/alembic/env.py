@@ -22,6 +22,7 @@ from app.models import (
 )
 from app.documents.models import Document
 from app.documents.chunk_models import DocumentChunk
+from app.rag.models import ChunkEmbedding
 from app.config.settings import get_settings
 
 config = context.config
