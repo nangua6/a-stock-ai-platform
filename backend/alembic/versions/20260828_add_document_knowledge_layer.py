@@ -1,36 +1,36 @@
 """add document knowledge layer
 
 Revision ID: doc_layer_001
-Revises: 20260827_add_watchlist
+Revises: 20260827_001
 Create Date: 2026-08-28
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
-# revision identifiers
 revision = 'doc_layer_001'
-down_revision = '20260827_add_watchlist'
+down_revision = '20260827_001'
 branch_labels = None
 depends_on = None
 
 
 def upgrade() -> None:
-    # Create document_type enum
-    document_type_enum = postgresql.ENUM(
-        'FINANCIAL', 'NEWS', 'ANNOUNCEMENT',
-        name='document_type_enum',
-        create_type=False,
-    )
-    document_type_enum.create(op.get_bind(), checkfirst=True)
+    # Create document_type enum only if it doesn't exist
+    op.execute("""
+        DO $$ BEGIN
+            CREATE TYPE document_type_enum AS ENUM ('FINANCIAL', 'NEWS', 'ANNOUNCEMENT');
+        EXCEPTION
+            WHEN duplicate_object THEN null;
+        END $$;
+    """)
 
     op.create_table(
         'documents',
         sa.Column('id', sa.String(64), primary_key=True, comment='Internal UUID'),
         sa.Column('document_id', sa.String(128), unique=True, nullable=False, index=True,
                   comment='Stable document ID'),
-        sa.Column('document_type', sa.Enum('FINANCIAL', 'NEWS', 'ANNOUNCEMENT',
-                                           name='document_type_enum', create_type=False),
+        sa.Column('document_type', postgresql.ENUM('FINANCIAL', 'NEWS', 'ANNOUNCEMENT',
+                                                    name='document_type_enum', create_type=False),
                   nullable=False, index=True),
         sa.Column('symbol', sa.String(20), nullable=False, index=True),
         sa.Column('title', sa.Text, nullable=False, server_default=''),
@@ -50,8 +50,6 @@ def upgrade() -> None:
                   onupdate=sa.func.now(), nullable=False),
         comment='Unified document knowledge base',
     )
-
-    # Composite indexes
     op.create_index('ix_documents_symbol_type', 'documents', ['symbol', 'document_type'])
     op.create_index('ix_documents_symbol_published', 'documents', ['symbol', 'published_at'])
 
