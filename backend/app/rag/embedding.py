@@ -1,7 +1,9 @@
 """EmbeddingProvider – abstract interface + OpenAI-compatible + Mock.
 
-All embedding calls go through this client. NEVER call embedding APIs directly.
-Supports batch embedding, retry, and cache.
+Real provider: OpenAI text-embedding-3-small (1536-dim, excellent Chinese support).
+Mock provider: deterministic hash-based vectors for unit tests.
+
+All embedding calls go through this client. NEVER call APIs directly.
 """
 from __future__ import annotations
 
@@ -9,21 +11,17 @@ import asyncio
 import hashlib
 import time
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Tuple
-
-import httpx
+from typing import List, Optional
 
 from app.config.settings import get_settings
 from app.core.logging import get_logger
 
 logger = get_logger("rag.embedding")
 
-# ── Configuration ─────────────────────────────────────────────────────────────
-
-DEFAULT_BATCH_SIZE = 32
 MAX_RETRIES = 3
 BASE_DELAY = 1.0
 REQUEST_TIMEOUT = 30.0
+DEFAULT_BATCH_SIZE = 64
 
 
 class EmbeddingProvider(ABC):
@@ -32,13 +30,11 @@ class EmbeddingProvider(ABC):
     @property
     @abstractmethod
     def model_name(self) -> str:
-        """Return the embedding model identifier."""
         ...
 
     @property
     @abstractmethod
     def dimension(self) -> int:
-        """Return the embedding vector dimension."""
         ...
 
     @abstractmethod
@@ -47,16 +43,13 @@ class EmbeddingProvider(ABC):
         ...
 
     async def embed_query(self, text: str) -> List[float]:
-        """Embed a single query text. Returns one vector."""
+        """Embed a single query text."""
         results = await self.embed([text])
         return results[0]
 
 
 class MockEmbeddingProvider(EmbeddingProvider):
-    """Deterministic mock embedding for unit tests.
-
-    Generates vectors from text hash — no network, no API key.
-    """
+    """Deterministic mock embedding for unit tests. No network, no API key."""
 
     def __init__(self, dimension: int = 128):
         self._dimension = dimension
@@ -70,37 +63,34 @@ class MockEmbeddingProvider(EmbeddingProvider):
         return self._dimension
 
     async def embed(self, texts: List[str]) -> List[List[float]]:
-        """Generate deterministic mock embeddings from text hash."""
         results = []
         for text in texts:
-            # Generate deterministic vector from text hash
             h = hashlib.sha256(text.encode()).digest()
-            # Expand hash to fill dimension
             vector = []
             for i in range(self._dimension):
                 byte_val = h[i % len(h)]
-                # Normalize to [-1, 1]
                 vector.append((byte_val / 127.5) - 1.0)
             results.append(vector)
         return results
 
 
-class OpenAICompatibleEmbeddingProvider(EmbeddingProvider):
-    """Embedding via OpenAI-compatible /embeddings API.
+class OpenAIEmbeddingProvider(EmbeddingProvider):
+    """Embedding via OpenAI /embeddings API.
 
-    Works with: OpenAI, MiMo Token Plan (if supported), local servers, etc.
+    Default model: text-embedding-3-small (1536-dim, excellent Chinese).
+    Supports batch embedding with retry + exponential backoff.
     """
 
     def __init__(
         self,
-        base_url: str,
         api_key: str,
+        base_url: str = "https://api.openai.com/v1",
         model: str = "text-embedding-3-small",
         dimension: int = 1536,
         batch_size: int = DEFAULT_BATCH_SIZE,
     ):
-        self._base_url = base_url.rstrip("/")
         self._api_key = api_key
+        self._base_url = base_url.rstrip("/")
         self._model = model
         self._dimension = dimension
         self._batch_size = batch_size
@@ -127,7 +117,7 @@ class OpenAICompatibleEmbeddingProvider(EmbeddingProvider):
         return all_embeddings
 
     async def _embed_batch_with_retry(self, texts: List[str]) -> List[List[float]]:
-        """Embed a single batch with exponential backoff retry."""
+        """Embed a batch with exponential backoff retry."""
         last_error = None
         for attempt in range(MAX_RETRIES):
             start = time.time()
@@ -160,36 +150,30 @@ class OpenAICompatibleEmbeddingProvider(EmbeddingProvider):
         raise ConnectionError(f"Embedding failed after {MAX_RETRIES} retries: {last_error}")
 
     async def _call_api(self, texts: List[str]) -> List[List[float]]:
-        """Call the /embeddings API endpoint."""
-        url = f"{self._base_url}/embeddings"
-        headers = {
-            "Authorization": f"Bearer {self._api_key}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": self._model,
-            "input": texts,
-        }
+        """Call OpenAI /embeddings API."""
+        from openai import AsyncOpenAI
 
-        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
-            response = await client.post(url, json=payload, headers=headers)
+        client = AsyncOpenAI(api_key=self._api_key, base_url=self._base_url)
 
-            if response.status_code != 200:
-                raise ConnectionError(
-                    f"Embedding API returned {response.status_code}: {response.text[:200]}"
-                )
+        response = await client.embeddings.create(
+            model=self._model,
+            input=texts,
+        )
 
-            data = response.json()
-            embeddings = []
-            for item in sorted(data.get("data", []), key=lambda x: x.get("index", 0)):
-                embeddings.append(item["embedding"])
+        # Sort by index to ensure correct ordering
+        sorted_data = sorted(response.data, key=lambda x: x.index)
+        embeddings = [item.embedding for item in sorted_data]
 
-            if len(embeddings) != len(texts):
-                raise ValueError(
-                    f"Expected {len(texts)} embeddings, got {len(embeddings)}"
-                )
+        if len(embeddings) != len(texts):
+            raise ValueError(f"Expected {len(texts)} embeddings, got {len(embeddings)}")
 
-            return embeddings
+        # Verify dimension
+        if embeddings and len(embeddings[0]) != self._dimension:
+            actual = len(embeddings[0])
+            logger.warning("embedding_dimension_mismatch", expected=self._dimension, actual=actual)
+            self._dimension = actual
+
+        return embeddings
 
 
 # ── Factory ───────────────────────────────────────────────────────────────────
@@ -204,21 +188,19 @@ def get_embedding_provider(mode: Optional[str] = None) -> EmbeddingProvider:
         return MockEmbeddingProvider(dimension=128)
 
     # Real mode: use OpenAI-compatible API
-    base_url = settings.embedding_base_url or settings.mimo_base_url
     api_key = settings.embedding_api_key or settings.mimo_api_key
+    base_url = settings.embedding_base_url or "https://api.openai.com/v1"
+    model = settings.embedding_model
+    dimension = settings.embedding_dimension
 
-    if not base_url or not api_key:
-        logger.warning("Embedding API not configured, falling back to mock")
+    if not api_key:
+        logger.warning("No embedding API key configured, falling back to mock")
         return MockEmbeddingProvider(dimension=128)
 
-    logger.info(
-        "Creating REAL embedding provider",
-        model=settings.embedding_model,
-        dimension=settings.embedding_dimension,
-    )
-    return OpenAICompatibleEmbeddingProvider(
-        base_url=base_url,
+    logger.info("Creating REAL embedding provider", model=model, dimension=dimension)
+    return OpenAIEmbeddingProvider(
         api_key=api_key,
-        model=settings.embedding_model,
-        dimension=settings.embedding_dimension,
+        base_url=base_url,
+        model=model,
+        dimension=dimension,
     )

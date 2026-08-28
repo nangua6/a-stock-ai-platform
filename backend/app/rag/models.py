@@ -1,24 +1,25 @@
-"""ChunkEmbedding ORM model for pgvector storage.
+"""ChunkEmbedding ORM model with native pgvector Vector(N) type.
 
-Uses real pgvector vector(N) type when available, falls back to Text.
-(chunk_id, model) is unique.
+Stores embedding vectors as PostgreSQL vector type for efficient
+cosine similarity search via pgvector extension.
+(chunk_id, model) is unique — same chunk can have embeddings from multiple models.
 """
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
 
-from sqlalchemy import DateTime, Float, Index, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import DateTime, Index, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
+from pgvector.sqlalchemy import Vector
 
 
 class ChunkEmbedding(Base):
     """Embedding vector for a document chunk.
 
-    The vector column stores embeddings as a JSON array of floats.
-    When pgvector is installed, this can be upgraded to Vector(N) type.
+    Uses native pgvector Vector(N) type.
+    Identity: (chunk_id, model) unique.
     """
     __tablename__ = "chunk_embeddings"
 
@@ -43,10 +44,10 @@ class ChunkEmbedding(Base):
     dimension: Mapped[int] = mapped_column(
         Integer, nullable=False,
     )
-    # Vector stored as JSON text; upgrade to pgvector Vector(N) when extension available
-    vector_json: Mapped[str] = mapped_column(
-        Text, nullable=False,
-        comment="Embedding vector as JSON array. Upgrade to Vector(N) with pgvector.",
+    # Native pgvector Vector type — dimension set at migration time
+    embedding = mapped_column(
+        Vector(1536), nullable=False,
+        comment="Embedding vector (pgvector Vector(1536))",
     )
     content_hash: Mapped[str] = mapped_column(
         String(64), nullable=False, index=True,

@@ -79,14 +79,13 @@ class TestEmbeddingFactory:
 
     def test_real_mode_fallback_to_mock(self):
         """Real mode with empty API keys should fallback to mock."""
-        from app.rag.embedding import OpenAICompatibleEmbeddingProvider
-        # Directly test: empty base_url + api_key → should still create provider
-        # (it's a valid provider, just won't work without real API)
-        provider = OpenAICompatibleEmbeddingProvider(
-            base_url="", api_key="", model="test", dimension=128,
+        from app.rag.embedding import OpenAIEmbeddingProvider
+        # Directly test: provider creation
+        provider = OpenAIEmbeddingProvider(
+            api_key="test-key", base_url="https://api.openai.com/v1",
+            model="test-model", dimension=128,
         )
-        # Verify it's created but would fail on actual call
-        assert provider.model_name == "test"
+        assert provider.model_name == "test-model"
         assert provider.dimension == 128
 
         # Test that mock provider is returned via factory with mock mode
@@ -228,7 +227,7 @@ class TestChunkEmbeddingModel:
         cols = {c.name for c in ChunkEmbedding.__table__.columns}
         required = {
             'id', 'chunk_id', 'document_id', 'symbol', 'document_type',
-            'model', 'dimension', 'vector_json', 'content_hash',
+            'model', 'dimension', 'embedding', 'content_hash',
             'created_at', 'updated_at',
         }
         assert required.issubset(cols), f"Missing: {required - cols}"

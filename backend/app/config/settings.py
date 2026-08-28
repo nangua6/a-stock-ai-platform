@@ -83,7 +83,7 @@ class Settings(BaseSettings):
     embedding_model: str = "text-embedding-3-small"
     embedding_dimension: int = 1536
     embedding_base_url: str = ""                # defaults to mimo_base_url if empty
-    embedding_api_key: str = ""                 # defaults to mimo_api_key if empty
+    embedding_api_key: str = ""                 # OpenAI API key (or compatible)
 
     # ── Broker ───────────────────────────────────────────────
     broker_provider: BrokerProvider = BrokerProvider.MOCK

@@ -1,4 +1,4 @@
-"""add chunk embeddings
+"""add chunk embeddings with native pgvector
 
 Revision ID: chunk_emb_001
 Revises: doc_chunks_001
@@ -6,15 +6,18 @@ Create Date: 2026-08-28
 """
 from alembic import op
 import sqlalchemy as sa
+from pgvector.sqlalchemy import Vector
 
 revision = 'chunk_emb_001'
 down_revision = 'doc_chunks_001'
 branch_labels = None
 depends_on = None
 
+EMBEDDING_DIMENSION = 1536  # Must match EMBEDDING_DIMENSION setting
+
 
 def upgrade() -> None:
-    # Enable pgvector extension (optional, for future upgrade)
+    # Enable pgvector extension
     op.execute('CREATE EXTENSION IF NOT EXISTS vector')
 
     op.create_table(
@@ -26,8 +29,8 @@ def upgrade() -> None:
         sa.Column('document_type', sa.String(30), nullable=False, index=True),
         sa.Column('model', sa.String(100), nullable=False),
         sa.Column('dimension', sa.Integer, nullable=False),
-        sa.Column('vector_json', sa.Text, nullable=False,
-                  comment='Embedding vector as JSON array'),
+        sa.Column('embedding', Vector(EMBEDDING_DIMENSION), nullable=False,
+                  comment='Embedding vector (pgvector)'),
         sa.Column('content_hash', sa.String(64), nullable=False, index=True),
         sa.Column('created_at', sa.DateTime(timezone=True),
                   server_default=sa.func.now(), nullable=False),
