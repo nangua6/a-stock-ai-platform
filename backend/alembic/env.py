@@ -20,6 +20,7 @@ from app.models import (
     User, Account, Stock, Kline, Order, Trade, Position, Signal,
     DataSyncJob, TechnicalSnapshot, AnalysisSnapshot,
 )
+from app.documents.models import Document
 from app.config.settings import get_settings
 
 config = context.config

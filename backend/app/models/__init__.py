@@ -12,10 +12,11 @@ from app.models.sync_job import DataSyncJob
 from app.models.technical_snapshot import TechnicalSnapshot
 from app.models.analysis_snapshot import AnalysisSnapshot
 from app.models.watchlist import WatchlistItem
+from app.documents.models import Document
 
 __all__ = [
     "BaseModel", "User", "Account", "Stock", "Kline",
     "Order", "Trade", "Position", "Signal",
     "DataSyncJob", "TechnicalSnapshot", "AnalysisSnapshot",
-    "WatchlistItem",
+    "WatchlistItem", "Document",
 ]

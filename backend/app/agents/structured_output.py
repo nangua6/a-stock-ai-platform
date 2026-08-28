@@ -38,6 +38,7 @@ class EvidenceItem(BaseModel):
     type: str = Field(default='UNKNOWN', description='Evidence type: MARKET/TECHNICAL/FINANCIAL/NEWS/ANNOUNCEMENT/RISK')
     source: str = Field(default='', description='Data source')
     citation_id: str = Field(default='', description='Unique citation identifier')
+    document_id: str = Field(default='', description='Stable document ID for traceability')
     timestamp: str = Field(default='', description='When the evidence was collected')
     summary: str = Field(default='', description='Brief summary of evidence')
 
