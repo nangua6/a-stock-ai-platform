@@ -61,7 +61,7 @@ class PgVectorStore(VectorStore):
             if emb:
                 # Update via raw SQL for native vector type
                 await session.execute(
-                    text("UPDATE chunk_embeddings SET embedding = :vec::vector, content_hash = :ch, dimension = :dim, updated_at = NOW() WHERE id = :id"),
+                    text("UPDATE chunk_embeddings SET embedding = CAST(:vec AS vector), content_hash = :ch, dimension = :dim, updated_at = NOW() WHERE id = :id"),
                     {"vec": vector_str, "ch": content_hash, "dim": len(vector), "id": emb.id},
                 )
             else:
@@ -69,7 +69,7 @@ class PgVectorStore(VectorStore):
                 await session.execute(
                     text("""
                         INSERT INTO chunk_embeddings (id, chunk_id, document_id, symbol, document_type, model, dimension, embedding, content_hash)
-                        VALUES (:id, :cid, :did, :sym, :dtype, :model, :dim, :vec::vector, :ch)
+                        VALUES (:id, :cid, :did, :sym, :dtype, :model, :dim, CAST(:vec AS vector), :ch)
                     """),
                     {
                         "id": str(uuid.uuid4()),
@@ -118,7 +118,7 @@ class PgVectorStore(VectorStore):
 
             query_sql = """
                 SELECT ce.chunk_id, ce.document_id, ce.symbol, ce.document_type,
-                       1 - (ce.embedding <=> :query_vec::vector) as score
+                       1 - (ce.embedding <=> CAST(:query_vec AS vector)) as score
                 FROM chunk_embeddings ce
                 WHERE 1=1
             """
@@ -131,7 +131,7 @@ class PgVectorStore(VectorStore):
                 query_sql += " AND ce.document_type = :document_type"
                 params["document_type"] = document_type
 
-            query_sql += " ORDER BY ce.embedding <=> :query_vec::vector LIMIT :top_k"
+            query_sql += " ORDER BY ce.embedding <=> CAST(:query_vec AS vector) LIMIT :top_k"
 
             result = await session.execute(text(query_sql), params)
             rows = result.fetchall()
